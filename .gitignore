@@ -1,0 +1,62 @@
+# Secrets — NUNCA commitear
+.streamlit/secrets.toml
+.env
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Datos locales / cache
+*.csv
+*.parquet
+*.db
+*.sqlite
+cache/
+data/cache/
+data/raw/
+data/processed/
+
+# Logs
+*.log
+logs/
+
+# Streamlit
+.streamlit/cache/
