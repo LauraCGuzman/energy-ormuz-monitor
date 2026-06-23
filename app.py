@@ -3,9 +3,11 @@ Monitor Energético Europa/Ormuz — Dashboard principal.
 
 Visualiza el estado actual de la seguridad energética europea bajo el
 contexto del conflicto del Estrecho de Hormuz (inicio 28-feb-2026):
-    - Reservas de gas subterráneo (GIE AGSI+)
-    - Utilización de terminales LNG (GIE ALSI+)
     - Flujos marítimos por el Estrecho (IMF PortWatch)
+    - Precio Brent spot + reservas estratégicas EEUU (EIA)
+    - Reservas de gas subterráneo Europa (GIE AGSI+)
+    - Reservas de emergencia de petróleo en días por país (Eurostat)
+    - Origen del gas importado por país (Eurostat)
 
 Punto de entrada: `streamlit run app.py`
 """
@@ -17,9 +19,11 @@ from plotly.subplots import make_subplots
 
 # Imports de extracción y transformación (asumiendo estructura de paquete 'data')
 from data.eia_client import fetch_brent_spot, fetch_spr_stocks  
-from data.gie_client import get_client, fetch_gas_storage, fetch_lng_terminals 
+from data.gie_client import get_client, fetch_gas_storage
 from data.portwatch_client import fetch_chokepoint_flows
-from data.transform import transform_eia, transform_portwatch, transform_gas, transform_lng
+from data.transform import transform_eia, transform_portwatch, transform_gas, transform_reservas_emergencia, transform_origen_gas, NOMBRES_PAISES_UE, NOMBRES_GEO
+from data.eurostat_client import fetch_reservas_emergencia, fetch_origen_gas
+from utils.charts import plot_reservas_emergencia, plot_origen_gas
 
 
 # Configuración de la página (debe ser la primera llamada a st)
@@ -133,7 +137,7 @@ def panel_reservas_eu() -> None:
     api_key = st.secrets["GIE_API_KEY"]
     client_gie = get_client(api_key=api_key)
     
-    # 1. Extracción (Bruto) - Filtramos por España "ES"
+    # 1. Extracción (Bruto) - Filtramos por Europa "EU"
     df_bruto = fetch_gas_storage(client_gie, "EU")
     
     # 2. Transformación (Significado del dato)
@@ -180,14 +184,9 @@ def panel_portwatch() -> None:
     # El cliente de PortWatch o tu función mapeada para Hormuz
     df_bruto = fetch_chokepoint_flows("chokepoint6", 2025)
     
-    # 2. Transformación básica (Significado del dato)
-    # Recuerda que transform_portwatch ya limpia columnas, setea 'date' como índice y ordena
+    # 2. Transformación (limpieza + media móvil 7 días en transform_portwatch)
     df_limpio = transform_portwatch(df_bruto)
-    
-    # 3. Preparación de la Visualización (Suavizado de la serie temporal)
-    # Calculamos la media móvil de 7 días para eliminar el ruido del fin de semana
-    df_limpio["n_tanker_smooth"] = df_limpio["n_tanker"].rolling(window=7, min_periods=1).mean()
-    
+
     date_max = max(df_limpio.index).strftime("%d-%m-%Y")
     # 4. Renderizado
     # Usamos el índice (date) de forma continua en el eje X
@@ -244,61 +243,88 @@ def panel_portwatch() -> None:
         "flujo físico de crudo."
     )
 
-def panel_lng_espana(client_gie=None) -> None:
-    """Panel de regasificación LNG en España (ALSI+). Muestra la resiliencia física."""
-    st.subheader("Regasificación y Salida de Terminales LNG — España (ALSI+)")
-    
-    # Menor 1: Preparado para recibir el cliente por parámetro desde main() o usar fallback seguro
-    if client_gie is None:
-        api_key = st.secrets["GIE_API_KEY"]
-        client_gie = get_client(api_key=api_key)
-    
-    # 1. Extracción (Filtro por España "ES" en terminales de GIE)
-    df_bruto = fetch_lng_terminals(client_gie, "ES")
-    
+
+def panel_reservas_emergencia() -> None:
+    """Panel interactivo: reservas de emergencia en días por país (UE-27)."""
+    st.subheader("Reservas de emergencia de petróleo de la UE-27 (en días de importación/consumo)")
+
+    # 1. Extracción (se descarga una vez y queda cacheado)
+    df_crudo = fetch_reservas_emergencia()
+
     # 2. Transformación
-    df_limpio = transform_lng(df_bruto)
-    
-    # Menor 2: Suavizado por media móvil de 7 días (Consistencia total con PortWatch)
-    # Al igual que con los petroleros, elimina el ruido operativo/estacional del fin de semana
-    df_limpio["sendOut_smooth"] = df_limpio["sendOut"].rolling(window=7, min_periods=1).mean()
-    
-    # 3. Renderizado (Línea temporal continua para ver el impacto visual cruzado con PortWatch)
-    fig = px.line(
-        df_limpio,
-        x=df_limpio.index,
-        y="sendOut_smooth",
-        labels={
-            "gasDayStart": "Fecha",
-            "sendOut_smooth": "Gas Regasificado Enviado a Red (Media Móvil 7d, GWh/día)"
-        },
-        title="Flujo de Salida de LNG (sendOut) — Línea Temporal Continua Suavizada",
-        color_discrete_sequence=["#1D3557"]  # Azul oscuro para contrastar con el rojo de PortWatch
+    df_long = transform_reservas_emergencia(df_crudo)
+
+    # 3. Desplegable de país
+    codigos_disponibles = sorted(df_long['geo'].unique())
+    opciones = sorted(
+        [(NOMBRES_PAISES_UE[c], c) for c in codigos_disponibles if c in NOMBRES_PAISES_UE],
+        key=lambda x: x[0]
     )
-    
-    fig.update_xaxes(title_text="Línea de tiempo")
-    
-    # CORRECCIÓN CONCEPTUAL CRÍTICA: Se elimina "Inyección" y se unifica el vocabulario técnico
-    fig.update_yaxes(title_text="Regasificación / Salida a Red (GWh/día)")
-    
-    # Rima visual: Misma vline del conflicto que en PortWatch
-    fig.add_vline(
-        x="2026-02-28", 
-        line_width=2, 
-        line_dash="dash", 
-        line_color="orange"
+    nombres_display = [nombre for nombre, _ in opciones]
+    codigos = [cod for _, cod in opciones]
+
+    idx_es = codigos.index('ES') if 'ES' in codigos else 0
+    seleccion = st.selectbox(
+        "País:", nombres_display, index=idx_es, key="sel_reservas_emergencia"
     )
-    fig.add_annotation(
-        x="2026-02-28",
-        y=df_limpio["sendOut_smooth"].max() if not df_limpio.empty else 100,
-        text="Inicio Conflicto (28-Feb)",
-        showarrow=True,
-        arrowhead=1,
-        ax=60,
-        ay=-20
-    )
-    
+    pais_cod = codigos[nombres_display.index(seleccion)]
+
+    # 4. Renderizado
+    if df_long[df_long['geo'] == pais_cod].empty:
+        st.warning(f"No hay datos para {seleccion}.")
+        return
+
+    fig = plot_reservas_emergencia(df_long, pais_cod, NOMBRES_PAISES_UE)
     st.plotly_chart(fig, width='stretch')
+
+    ultima_fecha = df_long['Fecha'].max().strftime("%B %Y")
+    st.caption(f"Última actualización de datos: {ultima_fecha} · Fuente: Eurostat (nrg_stk_oem)")
+    st.info(
+        "**Nota:** Autonomía del stock de emergencia de crudo y productos petrolíferos de los 27 Estados miembros. "
+        "Los días expresan el escudo de seguridad individual de cada país frente a su propio consumo e importaciones netas, "
+        "tomando como referencia el umbral mínimo de 90 días exigido por la directiva europea. Fuente: Eurostat."
+    )
+
+
+def panel_origen_gas() -> None:
+    """Panel interactivo: origen del gas importado por país o agregado UE-27."""
+    st.subheader("Origen del gas importado")
+
+    # 1. Extracción (dataset completo + diccionario de partners — cacheado)
+    df_gas, dic_partner = fetch_origen_gas()
+
+    # 2. Desplegable: UE primero, luego países alfabético
+    codigos_paises = sorted(
+        [c for c in NOMBRES_GEO if c != 'EU27_2020'],
+        key=lambda c: NOMBRES_GEO[c]
+    )
+    opciones = [(NOMBRES_GEO['EU27_2020'], 'EU27_2020')] + [
+        (NOMBRES_GEO[c], c) for c in codigos_paises
+    ]
+    nombres_display = [nombre for nombre, _ in opciones]
+    codigos = [cod for _, cod in opciones]
+
+    idx_es = codigos.index('ES') if 'ES' in codigos else 0
+    seleccion = st.selectbox(
+        "País:", nombres_display, index=idx_es, key="sel_origen_gas"
+    )
+    geo = codigos[nombres_display.index(seleccion)]
+    geo_nombre = NOMBRES_GEO.get(geo, geo)
+
+    # 3. Transformación para el país seleccionado
+    pivot = transform_origen_gas(df_gas, geo)
+
+    if pivot is None or pivot.empty:
+        st.warning(f"No hay datos de origen para {geo_nombre}.")
+        return
+
+    # 4. Renderizado
+    fig = plot_origen_gas(pivot, geo_nombre, dic_partner)
+    st.plotly_chart(fig, width='stretch')
+
+    ultima_fecha = pivot.index.max().strftime("%B %Y")
+    st.caption(f"Última actualización de datos: {ultima_fecha} · Fuente: Eurostat (nrg_ti_gasm)")
+
 
 def main() -> None:
     """Punto de entrada del dashboard."""
@@ -308,15 +334,20 @@ def main() -> None:
         "desde el inicio del conflicto del Estrecho de Hormuz (28-feb-2026)."
     )
 
-    # --- PASO 1: Brent ---
-    panel_brent()
-    
-    # --- PASO 2: Reservas España ---
-    panel_reservas_eu()
-
-    # --- PASO 3: El panel estrella ---
+    # --- PASO 1: El estrecho de Hormuz ---
     panel_portwatch()
 
+    # --- PASO 2: Brent+ reservas petróleo de EEUU ---
+    panel_brent()
+    
+    # --- PASO 3: Reservas de gas EU ---
+    panel_reservas_eu()
+
+    # --- PASO 4: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
+    panel_reservas_emergencia()
+
+    # --- PASO 5: Origen del gas importado (Eurostat nrg_ti_gasm) ---
+    panel_origen_gas()
 
 
 if __name__ == "__main__":

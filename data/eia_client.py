@@ -62,15 +62,15 @@ def fetch_spr_stocks(API_KEY, frecuencia: str = 'weekly', start: str = '2025-01-
         print("Error: No se encontró la API Key.")
         raise RuntimeError("Falta EIA_API_KEY")
 
-    # 2. Configurar la URL correcta para Petróleo (Brent)
+    # 2. Configurar la URL para reservas de crudo EEUU (serie semanal)
     URL_BASE = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/"
-    
+
     # 3. Construir el diccionario de parámetros AQUÍ (así puede usar API_KEY)
     parametros = {
         'api_key': API_KEY,
         'frequency': frecuencia,
         'data[]': 'value',
-        'facets[series][]': 'WCSSTUS1',  # ID típico del Brent de la EIA
+        'facets[series][]': 'WCSSTUS1',  # Reservas estratégicas de crudo EEUU - SPR (miles de barriles)
         'start': start,
         'sort[0][column]': 'period',
         'sort[0][direction]': 'asc'
@@ -101,3 +101,4 @@ def fetch_spr_stocks(API_KEY, frecuencia: str = 'weekly', start: str = '2025-01-
     # Convertir a DataFrame y retornar
     df = pd.DataFrame(lista_datos)
     return df
+

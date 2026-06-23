@@ -67,27 +67,4 @@ def fetch_gas_storage(
         end = pd.Timestamp.today().strftime("%Y-%m-%d")
     return _client.query_gas_country(country=country, start=start, end=end)
 
-@st.cache_data(ttl=3600)
-
-def fetch_lng_terminals(
-    _client,
-    country: str = "ES",
-    start: str = "2022-01-01",
-    end: str | None = None,
-) -> pd.DataFrame:
-    """Consulta ALSI+ — utilización de terminales LNG.
-
-    Args:
-        client: cliente GIE autenticado.
-        country: código ISO-2 del país (por defecto España, 6 terminales).
-        start: fecha de inicio (YYYY-MM-DD).
-        end: fecha de fin (None = hasta hoy).
-
-    Returns:
-        DataFrame con columnas: dtmi (capacidad), sendout (gas a red), inventory.
-        Índice: fecha (datetime).
-    """
-    if end is None:
-        end = pd.Timestamp.today().strftime("%Y-%m-%d")
-    return _client.query_lng_country(country=country, start=start, end=end)
 

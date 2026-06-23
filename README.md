@@ -2,18 +2,19 @@
 
 Dashboard de seguridad energética europea en el contexto del conflicto del Estrecho de Hormuz (inicio 28-feb-2026).
 
-Documenta en tiempo real cómo evoluciona la situación energética europea — con foco especial en España — usando datos públicos y verificables: reservas de gas (GIE AGSI+), utilización de terminales LNG (GIE ALSI+) y flujos marítimos por el Estrecho (IMF PortWatch).
+Documenta en tiempo real cómo evoluciona la situación energética europea usando datos públicos y verificables: flujos marítimos (IMF PortWatch), precio del crudo y reservas estratégicas (EIA), reservas de gas subterráneo (GIE AGSI+) y reservas de emergencia y origen del gas por país (Eurostat).
 
 No es geopolítica especulativa. Es análisis de datos físicos que se actualizan solos.
 
 ## Estado
 
-🔄 En construcción — Fase 1 (visualizador de estado actual).
+Fase 1 desplegada — 5 paneles en producción.
 
 ## Stack
 
-- Python 3.11+
-- `gie-py` — cliente GIE AGSI+ / ALSI+
+- Python 3.14
+- `gie-py` — cliente GIE AGSI+
+- `eurostat` — datos públicos Eurostat (sin key)
 - `requests` — IMF PortWatch
 - `pandas` — series temporales
 - `plotly` — visualización
@@ -39,8 +40,9 @@ pip install -r requirements.txt
 
 # 4. Configurar secrets
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Editar .streamlit/secrets.toml y añadir la API key de GIE
-# (registro gratuito en https://agsi.gie.eu)
+# Editar .streamlit/secrets.toml y añadir las API keys de EIA y GIE
+# EIA: registro gratuito en https://www.eia.gov/opendata/
+# GIE: registro gratuito en https://agsi.gie.eu
 
 # 5. Lanzar el dashboard
 streamlit run app.py
@@ -50,9 +52,11 @@ streamlit run app.py
 
 | Fuente | Dato | Acceso | Granularidad |
 |---|---|---|---|
-| GIE AGSI+ | Reservas gas subterráneo Europa/España | API REST, registro + key | Diaria desde 2011 |
-| GIE ALSI+ | Terminales LNG Europa | Mismo API key que AGSI+ | Diaria desde 2012 |
-| IMF PortWatch | Tráfico marítimo Hormuz | Público | Diaria |
+| IMF PortWatch | Tráfico marítimo Estrecho de Hormuz | Público | Diaria |
+| EIA | Precio Brent spot + reservas de crudo EEUU | API REST + key | Brent diario / reservas semanal |
+| GIE AGSI+ | Reservas gas subterráneo Europa | API REST, registro + key | Diaria desde 2011 |
+| Eurostat | Reservas de emergencia en días (nrg_stk_oem) | Público, sin key | Mensual |
+| Eurostat | Origen del gas importado (nrg_ti_gasm) | Público, sin key | Mensual |
 
 ## Estructura del repositorio
 
@@ -61,8 +65,11 @@ energy-ormuz-monitor/
 ├── app.py                      # dashboard principal Streamlit
 ├── data/
 │   ├── __init__.py
-│   ├── gie_client.py           # wrapper GIE API (AGSI+ y ALSI+)
-│   └── portwatch_client.py     # wrapper IMF PortWatch
+│   ├── eia_client.py           # wrapper EIA API (Brent + reservas crudo)
+│   ├── gie_client.py           # wrapper GIE API (AGSI+)
+│   ├── portwatch_client.py     # wrapper IMF PortWatch
+│   ├── eurostat_client.py      # wrapper Eurostat (público, sin key)
+│   └── transform.py            # limpieza y transformación de todos los datasets
 ├── utils/
 │   ├── __init__.py
 │   └── charts.py               # funciones de visualización reutilizables
@@ -76,4 +83,4 @@ energy-ormuz-monitor/
 
 ## Licencia
 
-Por definir antes de hacer público el repositorio.
+<!-- TODO Laura: elegir licencia antes de hacer público el repo -->
