@@ -304,9 +304,11 @@ def panel_reservas_emergencia() -> None:
     ultima_fecha = df_long['Fecha'].max().strftime("%B %Y")
     st.caption(f"Última actualización de datos: {ultima_fecha} · Fuente: Eurostat (nrg_stk_oem)")
     st.info(
-        "**Nota:** Autonomía del stock de emergencia de crudo y productos petrolíferos de los 27 Estados miembros. "
-        "Los días expresan el escudo de seguridad individual de cada país frente a su propio consumo e importaciones netas, "
-        "tomando como referencia el umbral mínimo de 90 días exigido por la directiva europea. Fuente: Eurostat."
+        "**Nota:** Autonomía del stock de emergencia de crudo y productos petrolíferos (Directiva 2009/119/CE). "
+        "El umbral mínimo varía por país según el criterio aplicado: **90 días** sobre importaciones netas "
+        "(mayoría de la UE), **61 días** sobre consumo interno para países con producción doméstica significativa "
+        "(Dinamarca, Rumanía, Estonia, Croacia), y **92 días** en el caso de España por exigencia legal propia. "
+        "La línea de referencia en cada gráfico refleja el mínimo específico del país seleccionado. Fuente: Eurostat (nrg_stk_oem)."
     )
 
 def panel_origen_gas() -> None:

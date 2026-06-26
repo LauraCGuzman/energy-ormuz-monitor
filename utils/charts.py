@@ -53,6 +53,20 @@ def plot_hormuz_traffic(df: pd.DataFrame, title: str = "Tráfico por Hormuz"):
     raise NotImplementedError
 
 
+# Mínimos obligatorios reales por país (Directiva 2009/119/CE).
+# Criterio importaciones netas → 90 días (mayoría UE).
+# Criterio consumo interno → 61 días (países con producción doméstica significativa).
+# España aplica excepción nacional: 92 días por ley propia (CORES).
+_MINIMOS_DIAS = {
+    'ES': (92, "Mín. legal ES (92 días)"),   # Ley 34/1998 + CORES: 2 días extra
+    'DK': (61, "Mín. legal DK (61 días)"),   # Producción Mar del Norte → criterio consumo
+    'RO': (61, "Mín. legal RO (61 días)"),   # Yacimientos propios → criterio consumo
+    'EE': (61, "Mín. legal EE (61 días)"),   # Oil shale local → criterio consumo
+    'HR': (61, "Mín. legal HR (61 días)"),   # Producción e inventario local → criterio consumo
+}
+_MINIMO_DEFAULT = (90, "Mín. legal UE (90 días)")  # Resto importadores netos
+
+
 def plot_reservas_emergencia(
     df_long: pd.DataFrame,
     pais_cod: str,
@@ -72,6 +86,7 @@ def plot_reservas_emergencia(
 
     d = df_long[df_long['geo'] == pais_cod]
     nombre = nombres_paises.get(pais_cod, pais_cod)
+    minimo_dias, minimo_label = _MINIMOS_DIAS.get(pais_cod, _MINIMO_DEFAULT)
 
     fig = px.line(
         d, x='Fecha', y='Dias', markers=True,
@@ -79,8 +94,8 @@ def plot_reservas_emergencia(
         labels={'Dias': 'Días de autonomía', 'Fecha': 'Fecha'}
     )
     fig.add_hline(
-        y=90, line_dash="dash", line_color="red",
-        annotation_text="Mínimo legal (90 días)"
+        y=minimo_dias, line_dash="dash", line_color="red",
+        annotation_text=minimo_label,
     )
     fig.add_vline(x="2026-02-28", line_dash="dot", line_color="black")
     fig.add_annotation(
