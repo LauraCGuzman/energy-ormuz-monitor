@@ -18,7 +18,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Imports de extracción y transformación (asumiendo estructura de paquete 'data')
-from data.eia_client import fetch_brent_spot, fetch_spr_stocks  
+from data.eia_client import fetch_brent_spot, fetch_spr_stocks, fetch_comercial_stocks  
 from data.gie_client import get_client, fetch_gas_storage
 from data.portwatch_client import fetch_chokepoint_flows
 from data.transform import transform_eia, transform_portwatch, transform_gas, transform_reservas_emergencia, transform_origen_gas, NOMBRES_PAISES_UE, NOMBRES_GEO
@@ -35,47 +35,60 @@ st.set_page_config(
 )
 
 def panel_brent() -> None:
-    """Panel autocontenido para la serie temporal del Brent Spot."""
+    """Panel autocontenido para la serie temporal del Brent Spot vs Reservas (SPR y Comerciales)."""
     st.subheader("Evolución de Reservas de Crudo de EEUU vs. Precio del Brent")
 
     API_KEY = st.secrets['EIA_API_KEY']
     # 1. Extracción (Bruto)
     data_brent_bruto = fetch_brent_spot(API_KEY)
     data_reservas_bruto = fetch_spr_stocks(API_KEY)
+    data_comercial_bruto = fetch_comercial_stocks(API_KEY)
 
-    # 2. Transformación (Significado del dato)
+    # 2. Transformación 
     data_brent = transform_eia(data_brent_bruto)
     data_reservas = transform_eia(data_reservas_bruto)
+    data_reservas_comerciales = transform_eia(data_comercial_bruto)
 
     # 3. Renderizado (Visualización)
-    # 1. Crear la figura base con el contenedor para eje secundario
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # 2. Añadir la serie de Reservas (Eje Y Primario - Izquierda)
+    # Serie 1: Reserva Estratégica (Eje Y Primario - Izquierda)
     fig.add_trace(
         go.Scatter(
             x=data_reservas.index,
             y=data_reservas["value"],
-            name="Reservas Crudo",
+            name="Reserva Estratégica (SPR)",
             mode="lines",
-            line=dict(color="#1D3557")  # Azul oscuro
+            line=dict(color="#1D3557", width=2.5)  # Azul oscuro dominante
         ),
         secondary_y=False
     )
 
-    # 3. Añadir la serie del Brent (Eje Y Secundario - Derecha)
+    # Serie 2: Reservas Comerciales (Eje Y Primario - Izquierda)
+    fig.add_trace(
+        go.Scatter(
+            x=data_reservas_comerciales.index,
+            y=data_reservas_comerciales["value"],
+            name="Reservas Comerciales",
+            mode="lines",
+            line=dict(color="#457B9D", width=2)  # Azul acero para diferenciar
+        ),
+        secondary_y=False
+    )
+
+    # Serie 3: Precio del Brent (Eje Y Secundario - Derecha)
     fig.add_trace(
         go.Scatter(
             x=data_brent.index,
             y=data_brent["value"],
             name="Precio Brent",
             mode="lines",
-            line=dict(color="#E63946")  # Rojo para contraste
+            line=dict(color="#E63946", width=2)  # Rojo para contraste
         ),
         secondary_y=True
     )
 
-    # 4. Configurar títulos, alinear leyenda y hover
+    # 4. Configurar diseño global, leyenda y hover
     fig.update_layout(
         hovermode="x unified",
         legend=dict(
@@ -87,46 +100,59 @@ def panel_brent() -> None:
         )
     )
 
-    # Rotular ejes Y (Quitamos el texto del eje X para liberar espacio)
+    # Rotular ejes Y y limpiar el eje X
     fig.update_yaxes(title_text="<b>Reservas</b> (Miles de barriles)", secondary_y=False)
     fig.update_yaxes(title_text="<b>Precio Brent</b> (USD/barril)", secondary_y=True)
-    fig.update_xaxes(title_text="") # <-- Dejamos esto vacío para eliminar el "Fecha" intrusivo
+    fig.update_xaxes(title_text="") 
 
-    # 5. Línea vertical del conflicto (Se mantiene igual)
+    # 5. Línea vertical del conflicto
     fig.add_vline(x="2026-02-28", line_width=2, line_dash="dash", line_color="orange")
     fig.add_annotation(
         x="2026-02-28", y=1, yref="paper",
         text="Inicio Conflicto (28-Feb)", showarrow=True, arrowhead=1, ax=60, ay=-20
     )
 
-    # 6. Límite técnico de las reservas (150.000)
+    # 6. Límite técnico SPR (150M)
     fig.add_hline(
-        y=150000, line_width=1.5, line_dash="dot", line_color="red",
-        annotation_text="Límite operativo crítico (150M bbl)",
+        y=150000, line_width=1.5, line_dash="dot", line_color="#1D3557",
+        annotation_text="Mínimo crítico SPR (150M bbl)",
         annotation_position="top left"
     )
 
-    # 7. Nota al pie reajustada y más baja
+    # 7. Límite técnico de las Comerciales (250M)
+    fig.add_hline(
+        y=250000, line_width=1.5, line_dash="dot", line_color="#457B9D",
+        annotation_text="Suelo operativo comercial (250M bbl)",
+        annotation_position="top left"
+    )
+
+    # 8. Nota al pie actualizada con las fuentes metodológicas
+    nota_metodologica = (
+        "<i>Nota: La Reserva Estratégica (SPR, serie EIA WCSSTUS1) es crudo estatal, liberable solo por autorización presidencial; "
+        "su capacidad de extracción decae conforme se vacían las cavernas. Las reservas comerciales (EIA WCESTUS1, excluyen la SPR) "
+        "son stock de trabajo en refinerías, terminales y oleoductos. Los dos suelos son referencias analíticas propias, no cifras oficiales: "
+        "150M bbl (extracción de la SPR ya degradada) y 250M bbl (mínimo operativo comercial estimado: llenado de oleoductos y fondos de tanque). "
+        "Brent: precio spot. El crudo conserva holgura sobre ambos suelos; la urgencia de suministro se mide en la cobertura de productos "
+        "(destilado y jet), no representada en este panel.</i>"
+    )
+    
     fig.add_annotation(
         x=0,
-        y=-0.22,  # <-- Bajada de -0.18 a -0.22 para alejarla bien de los números del eje X
+        y=-0.25,  # Bajamos la posición un poco más para evitar solapamientos con el eje temporal
         xref="paper",
         yref="paper",
-        text="<i>Nota: El límite de 150M de barriles representa el umbral crítico estimado de seguridad operativa de la Reserva Estratégica de Petróleo (SPR).</i>",
+        text=nota_metodologica,
         showarrow=False,
-        font=dict(size=11, color="gray"),
+        font=dict(size=10.5, color="gray"),
         xanchor="left"
     )
 
-    # Aumentamos el colchón inferior a 120 para que quepa la nota reubicada
+    # Colchón inferior aumentado a 140 para acomodar el texto explicativo largo
     fig.update_layout(
-        margin=dict(b=120) # <-- De 100 sube a 120
+        margin=dict(b=140) 
     )
 
-    # Para renderizar en Streamlit: st.plotly_chart(fig, use_container_width=True)
     st.plotly_chart(fig, width='stretch')
-        
-
 
 def panel_reservas_eu() -> None:
     """Panel autocontenido para las reservas de gas subterráneo en España."""
@@ -175,7 +201,6 @@ def panel_reservas_eu() -> None:
     )
     st.plotly_chart(fig, width='stretch')
         
-
 def panel_portwatch() -> None:
     """Panel estrella: Tránsito de petroleros en el Estrecho de Hormuz."""
     st.subheader("Flujos Marítimos: Estrecho de Hormuz (IMF PortWatch)")
@@ -243,7 +268,6 @@ def panel_portwatch() -> None:
         "flujo físico de crudo."
     )
 
-
 def panel_reservas_emergencia() -> None:
     """Panel interactivo: reservas de emergencia en días por país (UE-27)."""
     st.subheader("Reservas de emergencia de petróleo de la UE-27 (en días de importación/consumo)")
@@ -284,7 +308,6 @@ def panel_reservas_emergencia() -> None:
         "Los días expresan el escudo de seguridad individual de cada país frente a su propio consumo e importaciones netas, "
         "tomando como referencia el umbral mínimo de 90 días exigido por la directiva europea. Fuente: Eurostat."
     )
-
 
 def panel_origen_gas() -> None:
     """Panel interactivo: origen del gas importado por país o agregado UE-27."""
