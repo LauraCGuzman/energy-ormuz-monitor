@@ -63,3 +63,6 @@ logs/
 
 # Scripts de exploración local, no forman parte del proyecto
 sandbox/
+
+# Claude 
+.claude/

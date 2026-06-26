@@ -3,151 +3,75 @@ import pandas as pd
 import streamlit as st
 
 
-@st.cache_data(ttl=3600)
-
-def fetch_brent_spot(API_KEY, frecuencia: str = 'daily', start: str = '2025-01-01'
-     ) -> pd.DataFrame:
-    # 1. Cargar entorno y credenciales primero
+def _eia_get(API_KEY, url_base, series_id, frecuencia, start):
+    """Helper interno: realiza una petición a la EIA v2 y devuelve DataFrame crudo."""
     if not API_KEY:
-        print("Error: No se encontró la API Key.")
         raise RuntimeError("Falta EIA_API_KEY")
-
-    # 2. Configurar la URL correcta para Petróleo (Brent)
-    URL_BASE = "https://api.eia.gov/v2/petroleum/pri/spt/data/"
-    
-    # 3. Construir el diccionario de parámetros AQUÍ (así puede usar API_KEY)
     parametros = {
         'api_key': API_KEY,
         'frequency': frecuencia,
         'data[]': 'value',
-        'facets[series][]': 'RBRTE',  # ID típico del Brent de la EIA
+        'facets[series][]': series_id,
         'start': start,
         'sort[0][column]': 'period',
         'sort[0][direction]': 'asc'
     }
-
-    # 4. Realizar la petición HTTP GET
-    respuesta = requests.get(URL_BASE, params=parametros)
-
-    # ¡Que grite si falla! Si el status no es 200, raise_for_status() detiene la ejecución
+    respuesta = requests.get(url_base, params=parametros)
     if respuesta.status_code != 200:
-        print(f"❌ Error crítico en la API de EIA. Status: {respuesta.status_code}")
-        print(f"Detalle del error: {respuesta.text[:300]}")
-        respuesta.raise_for_status() 
-
-    # 5. Procesar la respuesta (Si llega aquí, sabemos que es 200)
+        print(f"❌ Error EIA {series_id}. Status: {respuesta.status_code}")
+        print(f"Detalle: {respuesta.text[:300]}")
+        respuesta.raise_for_status()
     datos_json = respuesta.json()
-    
-    # Extraer metadatos de control y datos reales
     total_disponible = int(datos_json['response']['total'])
     lista_datos = datos_json['response']['data']
-    filas_recibidas = len(lista_datos)
+    if len(lista_datos) < total_disponible:
+        print(f"⚠️ {series_id} truncado: {len(lista_datos)} de {total_disponible}")
+    return pd.DataFrame(lista_datos)
 
-    # 🚨 El Guardia del Límite (estilo ArcGIS/exceededTransferLimit)
-    if filas_recibidas < total_disponible:
-        print(f"⚠️ ¡ATENCIÓN! Datos truncados por la API. Recibidos: {filas_recibidas} de {total_disponible} totales.")
-        print("Sugerencia: Acota el parámetro 'start' o implementa paginación.")
 
-    # Convertir a DataFrame y retornar
-    df = pd.DataFrame(lista_datos)
-    return df
+_URL_SPT  = "https://api.eia.gov/v2/petroleum/pri/spt/data/"
+_URL_WSTK = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/"
+_URL_PSUP = "https://api.eia.gov/v2/petroleum/cons/wpsup/data/"
+
 
 @st.cache_data(ttl=3600)
+def fetch_brent_spot(API_KEY, frecuencia: str = 'daily', start: str = '2025-01-01') -> pd.DataFrame:
+    return _eia_get(API_KEY, _URL_SPT, 'RBRTE', frecuencia, start)
 
-def fetch_spr_stocks(API_KEY, frecuencia: str = 'weekly', start: str = '2025-01-01'
-     ) -> pd.DataFrame:
-    # 1. Cargar entorno y credenciales primero
-    
-    if not API_KEY:
-        print("Error: No se encontró la API Key.")
-        raise RuntimeError("Falta EIA_API_KEY")
-
-    # 2. Configurar la URL para reservas de crudo EEUU (serie semanal)
-    URL_BASE = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/"
-
-    # 3. Construir el diccionario de parámetros AQUÍ (así puede usar API_KEY)
-    parametros = {
-        'api_key': API_KEY,
-        'frequency': frecuencia,
-        'data[]': 'value',
-        'facets[series][]': 'WCSSTUS1',  # Reservas estratégicas de crudo EEUU - SPR (miles de barriles)
-        'start': start,
-        'sort[0][column]': 'period',
-        'sort[0][direction]': 'asc'
-    }
-
-    # 4. Realizar la petición HTTP GET
-    respuesta = requests.get(URL_BASE, params=parametros)
-
-    # ¡Que grite si falla! Si el status no es 200, raise_for_status() detiene la ejecución
-    if respuesta.status_code != 200:
-        print(f"❌ Error crítico en la API de EIA. Status: {respuesta.status_code}")
-        print(f"Detalle del error: {respuesta.text[:300]}")
-        respuesta.raise_for_status() 
-
-    # 5. Procesar la respuesta (Si llega aquí, sabemos que es 200)
-    datos_json = respuesta.json()
-    
-    # Extraer metadatos de control y datos reales
-    total_disponible = int(datos_json['response']['total'])
-    lista_datos = datos_json['response']['data']
-    filas_recibidas = len(lista_datos)
-
-    # 🚨 El Guardia del Límite (estilo ArcGIS/exceededTransferLimit)
-    if filas_recibidas < total_disponible:
-        print(f"⚠️ ¡ATENCIÓN! Datos truncados por la API. Recibidos: {filas_recibidas} de {total_disponible} totales.")
-        print("Sugerencia: Acota el parámetro 'start' o implementa paginación.")
-
-    # Convertir a DataFrame y retornar
-    df = pd.DataFrame(lista_datos)
-    return df
 
 @st.cache_data(ttl=3600)
+def fetch_spr_stocks(API_KEY, frecuencia: str = 'weekly', start: str = '2025-01-01') -> pd.DataFrame:
+    """Reservas estratégicas de crudo EEUU — SPR (WCSSTUS1), miles de barriles."""
+    return _eia_get(API_KEY, _URL_WSTK, 'WCSSTUS1', frecuencia, start)
 
-def fetch_comercial_stocks(API_KEY, frecuencia: str = 'weekly', start: str = '2025-01-01'
-     ) -> pd.DataFrame:
-    # 1. Cargar entorno y credenciales primero
-    
-    if not API_KEY:
-        print("Error: No se encontró la API Key.")
-        raise RuntimeError("Falta EIA_API_KEY")
 
-    # 2. Configurar la URL para reservas de crudo EEUU (serie semanal)
-    URL_BASE = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/"
+@st.cache_data(ttl=3600)
+def fetch_comercial_stocks(API_KEY, frecuencia: str = 'weekly', start: str = '2025-01-01') -> pd.DataFrame:
+    """Reservas comerciales de crudo EEUU (WCESTUS1), miles de barriles."""
+    return _eia_get(API_KEY, _URL_WSTK, 'WCESTUS1', frecuencia, start)
 
-    # 3. Construir el diccionario de parámetros AQUÍ (así puede usar API_KEY)
-    parametros = {
-        'api_key': API_KEY,
-        'frequency': frecuencia,
-        'data[]': 'value',
-        'facets[series][]': 'WCESTUS1',  # Reservas crudo comercial EEUU (miles de barriles)
-        'start': start,
-        'sort[0][column]': 'period',
-        'sort[0][direction]': 'asc'
-    }
 
-    # 4. Realizar la petición HTTP GET
-    respuesta = requests.get(URL_BASE, params=parametros)
+# ── Productos petrolíferos ────────────────────────────────────────────────────
 
-    # ¡Que grite si falla! Si el status no es 200, raise_for_status() detiene la ejecución
-    if respuesta.status_code != 200:
-        print(f"❌ Error crítico en la API de EIA. Status: {respuesta.status_code}")
-        print(f"Detalle del error: {respuesta.text[:300]}")
-        respuesta.raise_for_status() 
+@st.cache_data(ttl=3600)
+def fetch_destilado_stocks(API_KEY, frecuencia: str = 'weekly', start: str = '2023-01-01') -> pd.DataFrame:
+    """Existencias semanales de destilado (WDISTUS1), miles de barriles."""
+    return _eia_get(API_KEY, _URL_WSTK, 'WDISTUS1', frecuencia, start)
 
-    # 5. Procesar la respuesta (Si llega aquí, sabemos que es 200)
-    datos_json = respuesta.json()
-    
-    # Extraer metadatos de control y datos reales
-    total_disponible = int(datos_json['response']['total'])
-    lista_datos = datos_json['response']['data']
-    filas_recibidas = len(lista_datos)
 
-    # 🚨 El Guardia del Límite (estilo ArcGIS/exceededTransferLimit)
-    if filas_recibidas < total_disponible:
-        print(f"⚠️ ¡ATENCIÓN! Datos truncados por la API. Recibidos: {filas_recibidas} de {total_disponible} totales.")
-        print("Sugerencia: Acota el parámetro 'start' o implementa paginación.")
+@st.cache_data(ttl=3600)
+def fetch_jet_stocks(API_KEY, frecuencia: str = 'weekly', start: str = '2023-01-01') -> pd.DataFrame:
+    """Existencias semanales de jet fuel (WKJSTUS1), miles de barriles."""
+    return _eia_get(API_KEY, _URL_WSTK, 'WKJSTUS1', frecuencia, start)
 
-    # Convertir a DataFrame y retornar
-    df = pd.DataFrame(lista_datos)
-    return df
+
+@st.cache_data(ttl=3600)
+def fetch_destilado_supplied(API_KEY, frecuencia: str = 'weekly', start: str = '2023-01-01') -> pd.DataFrame:
+    """Product supplied de destilado (WDIUPUS2), miles de barriles/día — ya es tasa."""
+    return _eia_get(API_KEY, _URL_PSUP, 'WDIUPUS2', frecuencia, start)
+
+
+@st.cache_data(ttl=3600)
+def fetch_jet_supplied(API_KEY, frecuencia: str = 'weekly', start: str = '2023-01-01') -> pd.DataFrame:
+    """Product supplied de jet (WKJUPUS2), miles de barriles/día — ya es tasa."""
+    return _eia_get(API_KEY, _URL_PSUP, 'WKJUPUS2', frecuencia, start)

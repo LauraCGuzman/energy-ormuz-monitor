@@ -159,3 +159,35 @@ def transform_origen_gas(df_gas: "pd.DataFrame", geo: str) -> "pd.DataFrame | No
     pivot = pivot[pivot.index >= '2020-01-01']
 
     return pivot
+
+
+# ── Cobertura de productos petrolíferos ──────────────────────────────────────
+
+
+
+def transform_cobertura_us(df_stock_raw, df_supply_raw):
+    """Días de cobertura de productos petrolíferos en EEUU.
+
+    US Product Supplied (WDIUPUS2/WKJUPUS2) ya viene en miles bbl/día — es una tasa.
+    No se divide por días del mes. Días = stock_kbbl / supply_kbbl_per_día.
+    Dividir por días del mes daría un resultado ~30× sobreestimado (bug crítico).
+    """
+    stock = transform_eia(df_stock_raw)
+    supply = transform_eia(df_supply_raw)
+
+    # merge_asof requiere columnas, no índice
+    df_s = stock.reset_index().rename(columns={'period': 'fecha', 'value': 'stock'})
+    df_d = supply.reset_index().rename(columns={'period': 'fecha', 'value': 'supply'})
+
+    merged = pd.merge_asof(
+        df_s.sort_values('fecha'),
+        df_d.sort_values('fecha'),
+        on='fecha',
+        tolerance=pd.Timedelta('7d')
+    ).set_index('fecha')
+
+    merged = merged.dropna()
+    merged['dias'] = merged['stock'] / merged['supply']
+    return merged[['dias']]
+
+

@@ -38,3 +38,6 @@ def fetch_origen_gas() -> tuple[pd.DataFrame, dict]:
     dic_partner = dict(eurostat.get_dic('nrg_ti_gasm', 'partner'))
     dic_partner['Otros proveedores'] = 'Otros proveedores'
     return df, dic_partner
+
+
+

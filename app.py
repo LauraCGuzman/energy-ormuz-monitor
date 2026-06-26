@@ -18,11 +18,20 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Imports de extracción y transformación (asumiendo estructura de paquete 'data')
-from data.eia_client import fetch_brent_spot, fetch_spr_stocks, fetch_comercial_stocks  
+from data.eia_client import (
+    fetch_brent_spot, fetch_spr_stocks, fetch_comercial_stocks,
+    fetch_destilado_stocks, fetch_jet_stocks,
+)
 from data.gie_client import get_client, fetch_gas_storage
 from data.portwatch_client import fetch_chokepoint_flows
-from data.transform import transform_eia, transform_portwatch, transform_gas, transform_reservas_emergencia, transform_origen_gas, NOMBRES_PAISES_UE, NOMBRES_GEO
-from data.eurostat_client import fetch_reservas_emergencia, fetch_origen_gas
+from data.transform import (
+    transform_eia, transform_portwatch, transform_gas,
+    transform_reservas_emergencia, transform_origen_gas,
+    NOMBRES_PAISES_UE, NOMBRES_GEO,
+)
+from data.eurostat_client import (
+    fetch_reservas_emergencia, fetch_origen_gas,
+)
 from utils.charts import plot_reservas_emergencia, plot_origen_gas
 
 
@@ -103,7 +112,7 @@ def panel_brent() -> None:
     # Rotular ejes Y y limpiar el eje X
     fig.update_yaxes(title_text="<b>Reservas</b> (Miles de barriles)", secondary_y=False)
     fig.update_yaxes(title_text="<b>Precio Brent</b> (USD/barril)", secondary_y=True)
-    fig.update_xaxes(title_text="") 
+    #fig.update_xaxes(title_text="") 
 
     # 5. Línea vertical del conflicto
     fig.add_vline(x="2026-02-28", line_width=2, line_dash="dash", line_color="orange")
@@ -126,33 +135,24 @@ def panel_brent() -> None:
         annotation_position="top left"
     )
 
+    
+    # Colchón inferior aumentado a 50 para acomodar el texto explicativo largo
+    fig.update_layout(
+        margin=dict(b=50) 
+    )
+
+
+    st.plotly_chart(fig, width='stretch')
+
     # 8. Nota al pie actualizada con las fuentes metodológicas
-    nota_metodologica = (
-        "<i>Nota: La Reserva Estratégica (SPR, serie EIA WCSSTUS1) es crudo estatal, liberable solo por autorización presidencial; "
+    st.info (
+        "⚠️ **Nota**: La Reserva Estratégica (SPR, serie EIA WCSSTUS1) es crudo estatal, liberable solo por autorización presidencial; "
         "su capacidad de extracción decae conforme se vacían las cavernas. Las reservas comerciales (EIA WCESTUS1, excluyen la SPR) "
         "son stock de trabajo en refinerías, terminales y oleoductos. Los dos suelos son referencias analíticas propias, no cifras oficiales: "
         "150M bbl (extracción de la SPR ya degradada) y 250M bbl (mínimo operativo comercial estimado: llenado de oleoductos y fondos de tanque). "
         "Brent: precio spot. El crudo conserva holgura sobre ambos suelos; la urgencia de suministro se mide en la cobertura de productos "
         "(destilado y jet), no representada en este panel.</i>"
     )
-    
-    fig.add_annotation(
-        x=0,
-        y=-0.25,  # Bajamos la posición un poco más para evitar solapamientos con el eje temporal
-        xref="paper",
-        yref="paper",
-        text=nota_metodologica,
-        showarrow=False,
-        font=dict(size=10.5, color="gray"),
-        xanchor="left"
-    )
-
-    # Colchón inferior aumentado a 140 para acomodar el texto explicativo largo
-    fig.update_layout(
-        margin=dict(b=140) 
-    )
-
-    st.plotly_chart(fig, width='stretch')
 
 def panel_reservas_eu() -> None:
     """Panel autocontenido para las reservas de gas subterráneo en España."""
@@ -349,6 +349,105 @@ def panel_origen_gas() -> None:
     st.caption(f"Última actualización de datos: {ultima_fecha} · Fuente: Eurostat (nrg_ti_gasm)")
 
 
+def panel_nivel_producto_us() -> None:
+    """Panel: nivel de existencias de destilado y jet fuel en EEUU (EIA, semanal)."""
+    st.subheader("Existencias comerciales de productos petrolíferos en EEUU")
+
+    API_KEY = st.secrets['EIA_API_KEY']
+
+    # 1. Extracción (Nivel absoluto en miles de barriles)
+    df_dist_raw = fetch_destilado_stocks(API_KEY)
+    df_jet_raw  = fetch_jet_stocks(API_KEY)
+
+    # 2. Transformación
+    dist = transform_eia(df_dist_raw)
+    jet  = transform_eia(df_jet_raw)
+
+    # Suelos de referencia analítica (Mínimos estructurales históricos de la industria)
+    SUELO_DIST = 90000  # 90M bbl - Umbral crítico analítico
+    SUELO_JET  = 30000  # 30M bbl - Stock mínimo estructural de trabajo
+
+    CONFLICTO = "2026-02-28"
+
+    # 3. Renderizado — Dos subplots por diferencias de escala (Destilado ~100M bbl vs Jet ~40M bbl)
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        subplot_titles=["<b>Destilado (Gas oil / Diésel)</b>", "<b>Jet Fuel (Queroseno de aviación)</b>"],
+        vertical_spacing=0.15,
+    )
+
+    # ── Subplot 1: Destilado ──
+    fig.add_trace(go.Scatter(
+        x=dist.index, y=dist['value'],
+        name="Destilado EEUU",
+        mode="lines",
+        line=dict(color="#1D3557", width=2.5),
+    ), row=1, col=1)
+
+    fig.add_hline(
+        y=SUELO_DIST, line_width=1.5, line_dash="dot", line_color="#1D3557",
+        annotation_text=f"Suelo operativo estimado (90M bbl) ",
+        annotation_position="top right",
+        row=1, col=1,
+    )
+
+    # ── Subplot 2: Jet Fuel ──
+    fig.add_trace(go.Scatter(
+        x=jet.index, y=jet['value'],
+        name="Jet EEUU",
+        mode="lines",
+        line=dict(color="#457B9D", width=2),
+    ), row=2, col=1)
+
+    fig.add_hline(
+        y=SUELO_JET, line_width=1.5, line_dash="dot", line_color="#457B9D",
+        annotation_text=f"Suelo operativo estimado (30M bbl) ",
+        annotation_position="top right",
+        row=2, col=1,
+    )
+
+    # ── Elementos globales del layout ──
+    
+    # Línea vertical del conflicto cruzando todos los subplots
+    fig.add_vline(x=CONFLICTO, line_width=1.5, line_dash="dash", line_color="orange", row="all", col="all")
+    
+    # Anotación del conflicto en la parte superior del lienzo
+    fig.add_annotation(
+        x=CONFLICTO, y=1.02, yref="paper",
+        text="Inicio Conflicto (28-Feb)", showarrow=True, arrowhead=1, ax=60, ay=-15,
+    )
+
+    # Rotulación de ejes
+    fig.update_yaxes(title_text="<b>Existencias</b> (Kbbl)", row=1, col=1)
+    fig.update_yaxes(title_text="<b>Existencias</b> (Kbbl)", row=2, col=1)
+    fig.update_xaxes(title_text="", row=2, col=1)
+
+    fig.update_layout(
+        hovermode="x unified",
+        legend=dict(
+            orientation="h", 
+            yanchor="bottom", 
+            y=1.08, 
+            x=0, 
+            xanchor="left"
+        ),
+        margin=dict(b=40), # Reducido a 40 para dejar una separación limpia con el st.info
+    )
+
+    # Renderizado del gráfico
+    st.plotly_chart(fig, width='stretch')
+
+    # 4. Nota explicativa nativa de Streamlit (Evita truncamientos y mejora UI)
+    st.info(
+        "**Nota:** Las series de la EIA representan los inventarios comerciales netos de producto "
+        "refinado en suelo estadounidense. Los suelos de 90M bbl (Destilados) y 30M bbl (Jet Fuel) "
+        "son referencias analíticas propias basadas en los límites operativos mínimos históricos "
+        "(*tank bottoms* y *line fill* estructural) por debajo de los cuales aparecen disrupciones "
+        "severas en la distribución capilar. A diferencia del crudo, estas series reflejan la "
+        "urgencia real de suministro a corto plazo tras el cierre de Ormuz."
+    )
+
 def main() -> None:
     """Punto de entrada del dashboard."""
     st.title("Monitor Energético Europa/Ormuz")
@@ -371,6 +470,9 @@ def main() -> None:
 
     # --- PASO 5: Origen del gas importado (Eurostat nrg_ti_gasm) ---
     panel_origen_gas()
+
+    # --- PASO 6: Nivel de existencias de producto en EEUU (EIA semanal) ---
+    panel_nivel_producto_us()
 
 
 if __name__ == "__main__":
