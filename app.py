@@ -151,7 +151,7 @@ def panel_brent() -> None:
         "son stock de trabajo en refinerías, terminales y oleoductos. Los dos suelos son referencias analíticas propias, no cifras oficiales: "
         "150M bbl (extracción de la SPR ya degradada) y 250M bbl (mínimo operativo comercial estimado: llenado de oleoductos y fondos de tanque). "
         "Brent: precio spot. El crudo conserva holgura sobre ambos suelos; la urgencia de suministro se mide en la cobertura de productos "
-        "(destilado y jet), no representada en este panel.</i>"
+        "(destilado y jet), no representada en este panel."
     )
 
 def panel_reservas_eu() -> None:
