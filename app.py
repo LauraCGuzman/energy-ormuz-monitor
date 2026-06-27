@@ -218,10 +218,10 @@ def panel_portwatch() -> None:
     fig = px.line(
         df_limpio,
         x=df_limpio.index,
-        y="n_tanker_smooth",
+        y="n_tanker",
         labels={
             "date": "Fecha",
-            "n_tanker_smooth": "Media Móvil (7 días)"
+            "n_tanker": "Número de buques totales"
         },
         title="Tránsito Diario de Petroleros (Tankers) — Línea Temporal Continua",
         color_discrete_sequence=["#E63946"]  # Un color que resalte la criticidad
@@ -243,7 +243,7 @@ def panel_portwatch() -> None:
     )
     fig.add_annotation(
         x="2026-02-28",
-        y=df_limpio["n_tanker_smooth"].max(),
+        y=df_limpio["n_tanker"].max(),
         text="Inicio Conflicto (28-Feb)",
         showarrow=True,
         arrowhead=1,
