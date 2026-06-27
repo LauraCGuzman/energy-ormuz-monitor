@@ -110,8 +110,8 @@ def panel_brent() -> None:
     )
 
     # Rotular ejes Y y limpiar el eje X
-    fig.update_yaxes(title_text="<b>Reservas</b> (Miles de barriles)", secondary_y=False)
-    fig.update_yaxes(title_text="<b>Precio Brent</b> (USD/barril)", secondary_y=True)
+    fig.update_yaxes(title_text="<b>Reservas</b> [Miles de barriles]", secondary_y=False)
+    fig.update_yaxes(title_text="<b>Precio Brent</b> [USD/barril]", secondary_y=True)
     #fig.update_xaxes(title_text="") 
 
     # 5. Línea vertical del conflicto
@@ -178,11 +178,11 @@ def panel_reservas_eu() -> None:
     fig = px.line(
         df_limpio, 
         x="fecha_normalizada",  # Usamos la nueva columna de fechas alineadas
-        y="gasInStorage", 
+        y="full", 
         color=df_limpio["año"].astype(str),
         labels={
-            "gasInStorage": "Gas en Almacenamiento (TWh)", 
-            "fecha_normalizada": "Fecha (Día/Mes)", 
+            "full": "Nivel de llenado de gas [%]", 
+            "fecha_normalizada": "Fecha [Día/Mes]", 
             "color": "Año"
         },
         #title="Reservas de gas en Europa — comparativa por año"
