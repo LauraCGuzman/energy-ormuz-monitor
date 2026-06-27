@@ -154,7 +154,7 @@ def panel_brent() -> None:
         "(destilado y jet), no representada en este panel."
     )
 
-def panel_reservas_eu() -> None:
+def panel_reservas_eu_gas() -> None:
     """Panel autocontenido para las reservas de gas subterráneo en España."""
     st.subheader("Reservas de gas en Europa — comparativa por año(AGSI+)")
     
@@ -197,7 +197,7 @@ def panel_reservas_eu() -> None:
     fig.update_traces(
         # Cambiamos el comportamiento del hover para que muestre el día y mes real,
         # junto con el año real que viene de la leyenda de colores, ocultando el 2024 fantasma.
-        hovertemplate="<b>Año %{fullData.name}</b><br>Fecha: %{x|%d-%b}<br>Gas: %{y:.2f} TWh<extra></extra>"
+        hovertemplate="<b>Año %{fullData.name}</b><br>Fecha: %{x|%d-%b}<br>Nivel: %{y:.2f} %<extra></extra>"
     )
     st.plotly_chart(fig, width='stretch')
         
@@ -465,7 +465,7 @@ def main() -> None:
     panel_brent()
     
     # --- PASO 3: Reservas de gas EU ---
-    panel_reservas_eu()
+    panel_reservas_eu_gas()
 
     # --- PASO 4: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
     panel_reservas_emergencia()
