@@ -156,7 +156,7 @@ def panel_brent() -> None:
 
 def panel_reservas_eu_gas() -> None:
     """Panel autocontenido para las reservas de gas subterráneo en España."""
-    st.subheader("Reservas de gas en Europa — comparativa por año(AGSI+)")
+    st.subheader("Reservas de gas en Europa — comparativa por año (AGSI+)")
     
     # Inicialización temporal del cliente GIE (usando variables de entorno locales)
 
@@ -268,6 +268,7 @@ def panel_portwatch() -> None:
         "flujo físico de crudo."
     )
 
+@st.fragment
 def panel_reservas_emergencia() -> None:
     """Panel interactivo: reservas de emergencia en días por país (UE-27)."""
     st.subheader("Reservas de emergencia de petróleo de la UE-27 (en días de importación/consumo)")
@@ -288,6 +289,7 @@ def panel_reservas_emergencia() -> None:
     codigos = [cod for _, cod in opciones]
 
     idx_es = codigos.index('ES') if 'ES' in codigos else 0
+    
     seleccion = st.selectbox(
         "País:", nombres_display, index=idx_es, key="sel_reservas_emergencia"
     )
@@ -311,6 +313,7 @@ def panel_reservas_emergencia() -> None:
         "La línea de referencia en cada gráfico refleja el mínimo específico del país seleccionado. Fuente: Eurostat (nrg_stk_oem)."
     )
 
+@st.fragment
 def panel_origen_gas() -> None:
     """Panel interactivo: origen del gas importado por país o agregado UE-27."""
     st.subheader("Origen del gas importado")

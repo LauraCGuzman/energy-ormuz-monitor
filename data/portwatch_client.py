@@ -13,10 +13,12 @@ Limitaciones documentadas:
 from __future__ import annotations
 import pandas as pd
 import requests
+import streamlit as st
+
 
 PORTWATCH_BASE_URL = "https://portwatch.imf.org"
 
-
+@st.cache_data(ttl=21600)
 def fetch_chokepoint_flows(
     chokepoint: str = "chokepoint6",
     start_year: int = 2024,
