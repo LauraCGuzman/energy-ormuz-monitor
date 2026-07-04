@@ -27,7 +27,7 @@ from data.portwatch_client import fetch_chokepoint_flows
 from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
     transform_reservas_emergencia, transform_origen_gas,
-    NOMBRES_PAISES_UE, NOMBRES_GEO,
+    NOMBRES_PAISES_UE, NOMBRES_GEO, calcular_autonomias_spr, EstadoSPR
 )
 from data.eurostat_client import (
     fetch_reservas_emergencia, fetch_origen_gas,
@@ -42,6 +42,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# --- CONSTANTES DE NEGOCIO (NIVEL DE MÓDULO) ---
+SUELO_TECNICO_SPR = 150000.0          # En miles de barriles (150M bbl)
+SUELO_OPERATIVO_COMERCIAL = 250000.0   # En miles de barriles (250M bbl)
+
 
 def panel_brent() -> None:
     """Panel autocontenido para la serie temporal del Brent Spot vs Reservas (SPR y Comerciales)."""
@@ -58,61 +63,105 @@ def panel_brent() -> None:
     data_reservas = transform_eia(data_reservas_bruto)
     data_reservas_comerciales = transform_eia(data_comercial_bruto)
 
-    # 3. Renderizado (Visualización)
+    # --- Cálculo de Autonomía SPR ---
+    res = calcular_autonomias_spr(data_reservas, suelo_tecnico=SUELO_TECNICO_SPR)
+    
+    # Consumo del contrato semántico unificado: Typo imposible
+    if res["estado"] != EstadoSPR.SIN_DATOS:
+        col1, col2, col3 = st.columns(3)
+        dias_v = res["dias_ventana"]
+        
+        with col1:
+            if res["estado"] == EstadoSPR.DRENANDO:
+                dias = res["dias_restantes"]
+                value_text = f"{dias} días" if dias <= 90 else f"{dias} días (≈{int(dias/30)} meses)"
+                st.metric(
+                    label="Autonomía sobre suelo técnico",
+                    value=value_text
+                )
+            elif res["estado"] == EstadoSPR.ESTABLE:
+                st.metric(
+                    label="Autonomía sobre suelo técnico",
+                    value="—",
+                    help=f"Sin drawdown neto en los últimos {dias_v} días"
+                )
+                
+        with col2:
+            nivel_m_bbl = res["ultimo_nivel"] / 1000.0
+            delta_m_bbl = res["delta_ultimo"] / 1000.0
+            st.metric(
+                label="Nivel actual SPR",
+                value=f"{nivel_m_bbl:.1f} M bbl",
+                delta=f"{delta_m_bbl:+.1f} M bbl en {res['dias_delta_ultimo']} días"
+            )
+            
+        with col3:
+            ritmo_kbbl_dia = abs(res["ritmo_diario"])
+            st.metric(
+                label=f"Ritmo últimos {dias_v} días",
+                value=f"{ritmo_kbbl_dia:,.0f} kbbl/día"
+            )
+            
+        # Rótulo de riesgo dinámico y honesto
+        ultima_fecha_str = data_reservas.index.max().strftime('%d-%b-%Y')
+        st.caption(
+            f"Proyección lineal al ritmo de variación medido en los últimos {dias_v} días — no constituye una predicción. "
+            f"Suelo técnico de seguridad analítico: {SUELO_TECNICO_SPR/1000:.0f} M bbl. Último dato actualizado al {ultima_fecha_str}."
+        )
+    else:
+        st.caption("⚠️ Datos históricos insuficientes o inconsistentes para estimar métricas de autonomía.")
+
+    # 3. Renderizado (Visualización) con escala corregida
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # Serie 1: Reserva Estratégica (Eje Y Primario - Izquierda)
+    # Serie 1: Reserva Estratégica (M bbl)
     fig.add_trace(
         go.Scatter(
             x=data_reservas.index,
-            y=data_reservas["value"],
+            y=data_reservas["value"] / 1000.0,
             name="Reserva Estratégica (SPR)",
             mode="lines",
-            line=dict(color="#1D3557", width=2.5)  # Azul oscuro dominante
+            line=dict(color="#1D3557", width=2.5)
         ),
         secondary_y=False
     )
 
-    # Serie 2: Reservas Comerciales (Eje Y Primario - Izquierda)
+    # Serie 2: Reservas Comerciales (M bbl)
     fig.add_trace(
         go.Scatter(
             x=data_reservas_comerciales.index,
-            y=data_reservas_comerciales["value"],
+            y=data_reservas_comerciales["value"] / 1000.0,
             name="Reservas Comerciales",
             mode="lines",
-            line=dict(color="#457B9D", width=2)  # Azul acero para diferenciar
+            line=dict(color="#457B9D", width=2)
         ),
         secondary_y=False
     )
 
-    # Serie 3: Precio del Brent (Eje Y Secundario - Derecha)
+    # Serie 3: Precio del Brent
     fig.add_trace(
         go.Scatter(
             x=data_brent.index,
             y=data_brent["value"],
             name="Precio Brent",
             mode="lines",
-            line=dict(color="#E63946", width=2)  # Rojo para contraste
+            line=dict(color="#E63946", width=2)
         ),
         secondary_y=True
     )
 
-    # 4. Configurar diseño global, leyenda y hover
     fig.update_layout(
-        hovermode="x unified",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02, 
-            x=0, 
-            xanchor="left"
-        )
+    hovermode="x unified",  # ✅ Corregido a minúsculas
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02, 
+        x=0, 
+        xanchor="left"
     )
-
-    # Rotular ejes Y y limpiar el eje X
-    fig.update_yaxes(title_text="<b>Reservas</b> [Miles de barriles]", secondary_y=False)
+)
+    fig.update_yaxes(title_text="<b>Reservas</b> [Millones de barriles]", secondary_y=False)
     fig.update_yaxes(title_text="<b>Precio Brent</b> [USD/barril]", secondary_y=True)
-    #fig.update_xaxes(title_text="") 
 
     # 5. Línea vertical del conflicto
     fig.add_vline(x="2026-02-28", line_width=2, line_dash="dash", line_color="orange")
@@ -121,35 +170,29 @@ def panel_brent() -> None:
         text="Inicio Conflicto (28-Feb)", showarrow=True, arrowhead=1, ax=60, ay=-20
     )
 
-    # 6. Límite técnico SPR (150M)
+    # 6. Mínimo crítico SPR
     fig.add_hline(
-        y=150000, line_width=1.5, line_dash="dot", line_color="#1D3557",
-        annotation_text="Mínimo crítico SPR (150M bbl)",
+        y=SUELO_TECNICO_SPR / 1000.0, line_width=1.5, line_dash="dot", line_color="#1D3557",
+        annotation_text=f"Mínimo crítico SPR ({SUELO_TECNICO_SPR/1000:.0f}M bbl)",
         annotation_position="top left"
     )
 
-    # 7. Límite técnico de las Comerciales (250M)
+    # 7. Suelo operativo comercial
     fig.add_hline(
-        y=250000, line_width=1.5, line_dash="dot", line_color="#457B9D",
-        annotation_text="Suelo operativo comercial (250M bbl)",
+        y=SUELO_OPERATIVO_COMERCIAL / 1000.0, line_width=1.5, line_dash="dot", line_color="#457B9D",
+        annotation_text=f"Suelo operativo comercial ({SUELO_OPERATIVO_COMERCIAL/1000:.0f}M bbl)",
         annotation_position="top left"
     )
-
     
-    # Colchón inferior aumentado a 50 para acomodar el texto explicativo largo
-    fig.update_layout(
-        margin=dict(b=50) 
-    )
-
-
+    fig.update_layout(margin=dict(b=50))
     st.plotly_chart(fig, width='stretch')
 
-    # 8. Nota al pie actualizada con las fuentes metodológicas
+    # 8. Nota al pie metodológica
     st.info (
         "⚠️ **Nota**: La Reserva Estratégica (SPR, serie EIA WCSSTUS1) es crudo estatal, liberable solo por autorización presidencial; "
         "su capacidad de extracción decae conforme se vacían las cavernas. Las reservas comerciales (EIA WCESTUS1, excluyen la SPR) "
         "son stock de trabajo en refinerías, terminales y oleoductos. Los dos suelos son referencias analíticas propias, no cifras oficiales: "
-        "150M bbl (extracción de la SPR ya degradada) y 250M bbl (mínimo operativo comercial estimado: llenado de oleoductos y fondos de tanque). "
+        f"{SUELO_TECNICO_SPR/1000:.0f}M bbl (extracción de la SPR ya degradada) y {SUELO_OPERATIVO_COMERCIAL/1000:.0f}M bbl (mínimo operativo comercial estimado: llenado de oleoductos y fondos de tanque). "
         "Brent: precio spot. El crudo conserva holgura sobre ambos suelos; la urgencia de suministro se mide en la cobertura de productos "
         "(destilado y jet), no representada en este panel."
     )

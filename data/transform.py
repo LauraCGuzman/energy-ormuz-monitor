@@ -191,3 +191,86 @@ def transform_cobertura_us(df_stock_raw, df_supply_raw):
     return merged[['dias']]
 
 
+# El origen único del metadato. Esta clase se exporta.
+class EstadoSPR:
+    SIN_DATOS = "sin_datos"
+    DRENANDO = "drenando"
+    ESTABLE = "estable"
+
+def calcular_autonomias_spr(df: pd.DataFrame, suelo_tecnico: float = 150000.0) -> dict:
+    """
+    Calcula los días de autonomía restantes del SPR basándose en la ventana real 
+    más cercana a 30 días, midiendo la distancia exacta entre puntos temporales.
+    """
+    if df is None or len(df) < 2:
+        return {
+            "estado": EstadoSPR.SIN_DATOS,  # Consumo interno formal
+            "dias_restantes": None,
+            "ultimo_nivel": None,
+            "delta_ultimo": 0.0,
+            "dias_delta_ultimo": 0,
+            "ritmo_diario": 0.0,
+            "dias_ventana": 0
+        }
+
+    df_sorted = df.copy()
+    df_sorted.index = pd.to_datetime(df_sorted.index)
+    df_sorted = df_sorted.sort_index()
+    
+    ultima_fecha = df_sorted.index[-1]
+    anterior_fecha = df_sorted.index[-2]
+    
+    ultimo_nivel = float(df_sorted['value'].iloc[-1])
+    nivel_anterior = float(df_sorted['value'].iloc[-2])
+    
+    delta_ultimo = ultimo_nivel - nivel_anterior
+    dias_delta_ultimo = (ultima_fecha - anterior_fecha).days
+
+    fecha_teorica_30d = ultima_fecha - pd.Timedelta(days=30)
+    fecha_real_inicio = df_sorted.index.asof(fecha_teorica_30d)
+    
+    if pd.isna(fecha_real_inicio):
+        return {
+            "estado": EstadoSPR.SIN_DATOS,
+            "dias_restantes": None,
+            "ultimo_nivel": ultimo_nivel,
+            "delta_ultimo": delta_ultimo,
+            "dias_delta_ultimo": dias_delta_ultimo,
+            "ritmo_diario": 0.0,
+            "dias_ventana": 0
+        }
+        
+    dias_ventana = (ultima_fecha - fecha_real_inicio).days
+    
+    if dias_ventana <= 0:
+        return {
+            "estado": EstadoSPR.SIN_DATOS,
+            "dias_restantes": None,
+            "ultimo_nivel": ultimo_nivel,
+            "delta_ultimo": delta_ultimo,
+            "dias_delta_ultimo": dias_delta_ultimo,
+            "ritmo_diario": 0.0,
+            "dias_ventana": 0
+        }
+        
+    nivel_hace_30d = float(df_sorted['value'].loc[fecha_real_inicio])
+    media_descenso_diario = (ultimo_nivel - nivel_hace_30d) / float(dias_ventana)
+    barriles_disponibles = max(0.0, ultimo_nivel - suelo_tecnico)
+    
+    if media_descenso_diario < 0:
+        estado = EstadoSPR.DRENANDO
+        ritmo_vaciado_diario = abs(media_descenso_diario)
+        dias_restantes = int(barriles_disponibles / ritmo_vaciado_diario)
+    else:
+        estado = EstadoSPR.ESTABLE
+        dias_restantes = None
+        
+    return {
+        "estado": estado,  # Garantiza que la app reciba la constante controlada
+        "dias_restantes": dias_restantes,
+        "ultimo_nivel": ultimo_nivel,
+        "delta_ultimo": delta_ultimo,
+        "dias_delta_ultimo": dias_delta_ultimo,
+        "ritmo_diario": media_descenso_diario,
+        "dias_ventana": dias_ventana
+    }
