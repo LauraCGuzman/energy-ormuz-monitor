@@ -500,12 +500,12 @@ def main() -> None:
     """Punto de entrada del dashboard."""
     st.title("Monitor Energético Europa/Ormuz")
     st.text(
-        "Dashboard de seguridad energética europea: flujos marítimos por el Estrecho "
-        "de Ormuz, precio del Brent, reservas de crudo y gas. Datos físicos "
-        "verificables de IMF PortWatch, EIA, GIE AGSI+ y Eurostat, actualizados "
-        "automáticamente desde el inicio del conflicto (28-feb-2026)."
+    "¿Cómo de expuesto está el suministro energético europeo al cierre del "
+    "Estrecho de Ormuz, y cuánto colchón queda? Dashboard de seguridad "
+    "energética con datos físicos verificables — flujos marítimos, Brent, "
+    "reservas de crudo y gas — de IMF PortWatch, EIA, GIE AGSI+ y Eurostat, "
+    "actualizados automáticamente desde el inicio del conflicto (28-feb-2026)."
     )
-
     # --- PASO 1: El estrecho de Ormuz ---
     panel_portwatch()
 
@@ -524,6 +524,43 @@ def main() -> None:
     # --- PASO 6: Nivel de existencias de producto en EEUU (EIA semanal) ---
     panel_nivel_producto_us()
 
+    # --- PASO 7: Metodología
+    with st.expander("📋 Metodología y limitaciones"):
+        st.markdown("""
+        **Fuentes y frecuencias**
+        | Fuente | Dato | Frecuencia |
+        |---|---|---|
+        | IMF PortWatch | Tráfico marítimo (señales AIS) | Diaria |
+        | EIA | Brent spot | Diaria |
+        | EIA | Reservas de crudo (SPR y comerciales) y productos | Semanal |
+        | GIE AGSI+ | Reservas de gas subterráneo | Diaria |
+        | Eurostat | Reservas de emergencia y origen del gas | Mensual |
 
+        **Desfases de publicación**
+        - Las series semanales de la EIA llegan con 2–3 días de retraso sobre el período que cubren.
+        - Los datasets mensuales de Eurostat llegan con varios meses de desfase: los últimos
+        movimientos (p. ej. la liberación coordinada de reservas de la IEA) aún no aparecen
+        reflejados en los paneles basados en Eurostat.
+        - Los datos AIS de PortWatch están afectados por interferencias GPS (*jamming*) en la zona
+        del Golfo desde febrero de 2026 y por buques que apagan o falsean el transpondedor
+        (*spoofing*). El tráfico observado es un suelo, no una cifra exacta.
+
+        **Umbrales y proyecciones**
+        - Los suelos marcados en los paneles (SPR 150 M bbl, comerciales 250 M bbl, destilado
+        90 M bbl, jet 30 M bbl) son **referencias analíticas propias**, no límites oficiales.
+        La única referencia normativa es la Directiva 2009/119/CE: 90 días de importaciones
+        netas o 61 días de consumo, según país.
+        - Las autonomías en días son **proyecciones lineales al ritmo observado**, no predicciones.
+        - Los días de cobertura no son aditivos entre países: cada cifra se calcula sobre el
+        consumo o importación de su propio país.
+
+        **Qué NO mide este monitor**
+        - No predice precios ni escenarios futuros.
+        - No establece causalidad: los movimientos se describen como *consistentes con* el
+        contexto, no como consecuencia probada.
+        - No cubre flujos de refino, mercado spot de LNG ni contratos bilaterales — solo
+        magnitudes físicas públicas.
+        """)
+        
 if __name__ == "__main__":
     main()
