@@ -499,9 +499,11 @@ def panel_nivel_producto_us() -> None:
 def main() -> None:
     """Punto de entrada del dashboard."""
     st.title("Monitor Energético Europa/Ormuz")
-    st.caption(
-        "Datos físicos verificables sobre la situación energética europea "
-        "desde el inicio del conflicto del Estrecho de Hormuz (28-feb-2026)."
+    st.text(
+        "Dashboard de seguridad energética europea: flujos marítimos por el Estrecho "
+        "de Hormuz, precio del Brent, reservas de crudo y gas. Datos físicos "
+        "verificables de IMF PortWatch, EIA, GIE AGSI+ y Eurostat, actualizados "
+        "automáticamente desde el inicio del conflicto (28-feb-2026)."
     )
 
     # --- PASO 1: El estrecho de Hormuz ---

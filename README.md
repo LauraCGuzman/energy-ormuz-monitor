@@ -2,13 +2,20 @@
 
 Dashboard de seguridad energética europea en el contexto del conflicto del Estrecho de Hormuz (inicio 28-feb-2026).
 
-Documenta en tiempo real cómo evoluciona la situación energética europea usando datos públicos y verificables: flujos marítimos (IMF PortWatch), precio del crudo y reservas estratégicas (EIA), reservas de gas subterráneo (GIE AGSI+) y reservas de emergencia y origen del gas por país (Eurostat).
+Documenta en tiempo real cómo evoluciona la situación energética europea usando datos públicos y verificables: flujos marítimos (IMF PortWatch), precio del crudo y reservas estratégicas y comerciales de EEUU (EIA), existencias de productos petrolíferos en EEUU (EIA), reservas de gas subterráneo (GIE AGSI+) y reservas de emergencia y origen del gas por país (Eurostat).
 
 No es geopolítica especulativa. Es análisis de datos físicos que se actualizan solos.
 
 ## Estado
 
-Fase 1 desplegada — 5 paneles en producción.
+Fase 1 desplegada — 6 paneles en producción:
+
+1. **Flujos marítimos — Estrecho de Hormuz** (IMF PortWatch): tráfico diario de buques con media móvil de 7 días.
+2. **Brent spot vs. reservas de crudo de EEUU** (EIA): precio diario del Brent frente a reservas estratégicas (SPR) y comerciales, con métricas de autonomía proyectada sobre suelos técnicos de referencia.
+3. **Reservas de gas subterráneo en Europa** (GIE AGSI+): nivel de llenado con comparativa interanual.
+4. **Reservas de emergencia de petróleo UE-27** (Eurostat): días de autonomía por país.
+5. **Origen del gas importado** (Eurostat): mix de proveedores por país y agregado UE-27.
+6. **Existencias comerciales de productos petrolíferos en EEUU** (EIA): destilado y jet fuel frente a suelos operativos estimados — la señal de urgencia de suministro a corto plazo.
 
 ## Stack
 
@@ -53,7 +60,9 @@ streamlit run app.py
 | Fuente | Dato | Acceso | Granularidad |
 |---|---|---|---|
 | IMF PortWatch | Tráfico marítimo Estrecho de Hormuz | Público | Diaria |
-| EIA | Precio Brent spot + reservas de crudo EEUU | API REST + key | Brent diario / reservas semanal |
+| EIA | Precio Brent spot | API REST + key | Diaria |
+| EIA | Reservas de crudo EEUU: SPR (WCSSTUS1) y comerciales (WCESTUS1) | API REST + key | Semanal |
+| EIA | Existencias de productos EEUU: destilado (WDISTUS1) y jet fuel (WKJSTUS1) | API REST + key | Semanal |
 | GIE AGSI+ | Reservas gas subterráneo Europa | API REST, registro + key | Diaria desde 2011 |
 | Eurostat | Reservas de emergencia en días (nrg_stk_oem) | Público, sin key | Mensual |
 | Eurostat | Origen del gas importado (nrg_ti_gasm) | Público, sin key | Mensual |
@@ -65,7 +74,7 @@ energy-ormuz-monitor/
 ├── app.py                      # dashboard principal Streamlit
 ├── data/
 │   ├── __init__.py
-│   ├── eia_client.py           # wrapper EIA API (Brent + reservas crudo)
+│   ├── eia_client.py           # wrapper EIA API (Brent, crudo y productos)
 │   ├── gie_client.py           # wrapper GIE API (AGSI+)
 │   ├── portwatch_client.py     # wrapper IMF PortWatch
 │   ├── eurostat_client.py      # wrapper Eurostat (público, sin key)
@@ -83,4 +92,4 @@ energy-ormuz-monitor/
 
 ## Licencia
 
-<!-- TODO Laura: elegir licencia antes de hacer público el repo -->
+Este proyecto se distribuye bajo licencia [MIT](LICENSE).
