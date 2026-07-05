@@ -2,7 +2,7 @@
 Monitor Energético Europa/Ormuz — Dashboard principal.
 
 Visualiza el estado actual de la seguridad energética europea bajo el
-contexto del conflicto del Estrecho de Hormuz (inicio 28-feb-2026):
+contexto del conflicto del Estrecho de Ormuz (inicio 28-feb-2026):
     - Flujos marítimos por el Estrecho (IMF PortWatch)
     - Precio Brent spot + reservas estratégicas EEUU (EIA)
     - Reservas de gas subterráneo Europa (GIE AGSI+)
@@ -245,11 +245,11 @@ def panel_reservas_eu_gas() -> None:
     st.plotly_chart(fig, width='stretch')
         
 def panel_portwatch() -> None:
-    """Panel estrella: Tránsito de petroleros en el Estrecho de Hormuz."""
-    st.subheader("Flujos Marítimos: Estrecho de Hormuz (IMF PortWatch)")
+    """Panel estrella: Tránsito de petroleros en el Estrecho de Ormuz."""
+    st.subheader("Flujos Marítimos: Estrecho de Ormuz (IMF PortWatch)")
     
     # 1. Extracción (Bruto)
-    # El cliente de PortWatch o tu función mapeada para Hormuz
+    # El cliente de PortWatch o tu función mapeada para Ormuz
     df_bruto = fetch_chokepoint_flows("chokepoint6", 2025)
     
     # 2. Transformación (limpieza + media móvil 7 días en transform_portwatch)
@@ -501,12 +501,12 @@ def main() -> None:
     st.title("Monitor Energético Europa/Ormuz")
     st.text(
         "Dashboard de seguridad energética europea: flujos marítimos por el Estrecho "
-        "de Hormuz, precio del Brent, reservas de crudo y gas. Datos físicos "
+        "de Ormuz, precio del Brent, reservas de crudo y gas. Datos físicos "
         "verificables de IMF PortWatch, EIA, GIE AGSI+ y Eurostat, actualizados "
         "automáticamente desde el inicio del conflicto (28-feb-2026)."
     )
 
-    # --- PASO 1: El estrecho de Hormuz ---
+    # --- PASO 1: El estrecho de Ormuz ---
     panel_portwatch()
 
     # --- PASO 2: Brent+ reservas petróleo de EEUU ---
