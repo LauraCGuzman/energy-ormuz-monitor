@@ -1,6 +1,6 @@
 # Energy Ormuz Monitor
 
-Dashboard de seguridad energética europea en el contexto del conflicto del Estrecho de Hormuz (inicio 28-feb-2026).
+Dashboard de seguridad energética europea en el contexto del conflicto del Estrecho de Ormuz (inicio 28-feb-2026).
 
 Documenta en tiempo real cómo evoluciona la situación energética europea usando datos públicos y verificables: flujos marítimos (IMF PortWatch), precio del crudo y reservas estratégicas y comerciales de EEUU (EIA), existencias de productos petrolíferos en EEUU (EIA), reservas de gas subterráneo (GIE AGSI+) y reservas de emergencia y origen del gas por país (Eurostat).
 
@@ -10,7 +10,7 @@ No es geopolítica especulativa. Es análisis de datos físicos que se actualiza
 
 Fase 1 desplegada — 6 paneles en producción:
 
-1. **Flujos marítimos — Estrecho de Hormuz** (IMF PortWatch): tráfico diario de buques con media móvil de 7 días.
+1. **Flujos marítimos — Estrecho de Ormuz** (IMF PortWatch): tráfico diario de buques con media móvil de 7 días.
 2. **Brent spot vs. reservas de crudo de EEUU** (EIA): precio diario del Brent frente a reservas estratégicas (SPR) y comerciales, con métricas de autonomía proyectada sobre suelos técnicos de referencia.
 3. **Reservas de gas subterráneo en Europa** (GIE AGSI+): nivel de llenado con comparativa interanual.
 4. **Reservas de emergencia de petróleo UE-27** (Eurostat): días de autonomía por país.
@@ -59,7 +59,7 @@ streamlit run app.py
 
 | Fuente | Dato | Acceso | Granularidad |
 |---|---|---|---|
-| IMF PortWatch | Tráfico marítimo Estrecho de Hormuz | Público | Diaria |
+| IMF PortWatch | Tráfico marítimo Estrecho de Ormuz | Público | Diaria |
 | EIA | Precio Brent spot | API REST + key | Diaria |
 | EIA | Reservas de crudo EEUU: SPR (WCSSTUS1) y comerciales (WCESTUS1) | API REST + key | Semanal |
 | EIA | Existencias de productos EEUU: destilado (WDISTUS1) y jet fuel (WKJSTUS1) | API REST + key | Semanal |
