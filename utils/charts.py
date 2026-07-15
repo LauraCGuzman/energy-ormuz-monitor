@@ -137,3 +137,128 @@ def plot_origen_gas(
     )
     fig.update_layout(hovermode='x unified', margin=dict(l=40, r=40, t=60, b=40))
     return fig
+
+
+def plot_lng_utilization(
+    df: pd.DataFrame,
+    title_zona: str = "UE",
+    conflicto: str = "2026-02-28",
+):
+    """Panel de GNL: ¿siguen llegando barcos, y con cuánto margen?
+
+    Dos filas, porque responden preguntas distintas:
+      Fila 1 — inventory/dtmi (%): llenado de los tanques de las terminales.
+               Sube SOLO cuando descarga un metanero; baja de forma continua
+               por regasificación. De ahí el diente de sierra. La alarma
+               temprana no es un nivel: es que los dientes DESAPAREZCAN
+               (caída monótona sin recargas = no llegan barcos).
+      Fila 2 — sendOut vs dtrs (GWh/d): lo que se inyecta a la red frente al
+               máximo técnico. El hueco entre la línea y el techo es la holgura
+               (equivale a sendOut/dtrs, pero se ve sin calcular el ratio).
+
+    Decisiones de diseño:
+      - NO se aplica media móvil a la fila 1: suavizar borraría los dientes,
+        que son justamente la señal.
+      - No se mezclan unidades: inventory y dtmi son volumen (10^3 m3 GNL),
+        sendOut y dtrs son energía (GWh/d). Cada ratio vive en su fila.
+      - coveredCapacity NO se pinta: es metadato (% de instalaciones incluidas
+        en la agregación). Se reporta como anotación de calidad, porque una
+        caída suya produce un escalón artificial en la serie — un falso positivo.
+
+    Args:
+        df: DataFrame indexado por fecha (salida de transform_lng).
+        title_zona: nombre legible de la zona para los títulos ("UE", "España").
+        conflicto: fecha del marcador vertical de inicio del conflicto.
+
+    Returns:
+        plotly.graph_objects.Figure
+    """
+    import numpy as np
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    def _col(nombre: str):
+        return next((c for c in df.columns if c.lower() == nombre.lower()), None)
+
+    c_inv, c_dtmi = _col("inventory"), _col("dtmi")
+    c_so, c_dtrs = _col("sendOut"), _col("dtrs")
+    c_cov = _col("coveredCapacity")
+
+    faltan = [n for n, c in [("inventory", c_inv), ("dtmi", c_dtmi), ("sendOut", c_so)] if c is None]
+    if faltan:
+        raise KeyError(f"Faltan columnas {faltan} en {list(df.columns)}")
+
+    d = pd.DataFrame(index=df.index)
+    d["llenado"] = df[c_inv].astype(float) / df[c_dtmi].astype(float).replace(0, np.nan) * 100
+    d["sendout"] = df[c_so].astype(float)
+    if c_dtrs is not None:
+        d["dtrs"] = df[c_dtrs].astype(float).replace(0, np.nan)
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        subplot_titles=[
+            "<b>¿Están llegando barcos?</b> — GNL en los tanques de las terminales",
+            "<b>¿Cuánto se está usando?</b> — envío a la red frente al máximo técnico",
+        ],
+        vertical_spacing=0.15,
+    )
+
+    # ── Subplot 1: llenado de tanques (la alarma) ──
+    fig.add_trace(go.Scatter(
+        x=d.index, y=d["llenado"],
+        name="Tanques llenos (%)",
+        mode="lines",
+        line=dict(color="#1D3557", width=2),
+        hovertemplate="%{y:.1f}%<extra>Tanques llenos</extra>",
+    ), row=1, col=1)
+
+    # ── Subplot 2: envío a red + techo de capacidad ──
+    if "dtrs" in d:
+        fig.add_trace(go.Scatter(
+            x=d.index, y=d["dtrs"],
+            name="Capacidad máx. de regasificación",
+            mode="lines",
+            line=dict(color="#A8A8A8", width=1.5, dash="dot"),
+            hovertemplate="%{y:,.0f} GWh/d<extra>Máximo técnico</extra>",
+        ), row=2, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=d.index, y=d["sendout"],
+        name="Envío a la red",
+        mode="lines",
+        line=dict(color="#457B9D", width=2),
+        fill="tozeroy", fillcolor="rgba(69,123,157,0.15)",
+        hovertemplate="%{y:,.0f} GWh/d<extra>Envío a la red</extra>",
+    ), row=2, col=1)
+
+    # ── Elementos globales ──
+    fig.add_vline(x=conflicto, line_width=1.5, line_dash="dash", line_color="orange",
+                  row="all", col="all")
+    fig.add_annotation(
+        x=conflicto, y=1.02, yref="paper",
+        text="Inicio Conflicto (28-Feb)", showarrow=True, arrowhead=1, ax=60, ay=-15,
+    )
+
+    fig.update_yaxes(title_text="<b>Tanques llenos</b> (%)", range=[0, 100], row=1, col=1)
+    fig.update_yaxes(title_text="<b>Envío a la red</b> (GWh/día)", rangemode="tozero", row=2, col=1)
+    fig.update_xaxes(title_text="", row=2, col=1)
+
+    fig.update_layout(
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.10, x=0),
+        margin=dict(l=40, r=40, t=80, b=40),
+    )
+
+    # ── Calidad del dato (coveredCapacity): anotación, nunca serie ──
+    if c_cov is not None:
+        cov = df[c_cov].replace(0, np.nan)      # 0 = sin dato, no 0% de cobertura
+        if cov.notna().any() and float(cov.min()) < 99.5:
+            fig.add_annotation(
+                x=0, y=-0.14, xref="paper", yref="paper",
+                text=(f"⚠️ Cobertura mínima del agregado: {float(cov.min()):.0f}% "
+                      "— hay días con instalaciones ausentes (posible escalón artificial)."),
+                showarrow=False, font=dict(size=11, color="#B00020"), xanchor="left",
+            )
+
+    return fig

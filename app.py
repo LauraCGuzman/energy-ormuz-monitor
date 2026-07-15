@@ -22,7 +22,7 @@ from data.eia_client import (
     fetch_brent_spot, fetch_spr_stocks, fetch_comercial_stocks,
     fetch_destilado_stocks, fetch_jet_stocks,
 )
-from data.gie_client import get_client, fetch_gas_storage
+from data.gie_client import get_client, fetch_gas_storage, fetch_lng
 from data.portwatch_client import fetch_chokepoint_flows
 from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
@@ -32,7 +32,7 @@ from data.transform import (
 from data.eurostat_client import (
     fetch_reservas_emergencia, fetch_origen_gas,
 )
-from utils.charts import plot_reservas_emergencia, plot_origen_gas
+from utils.charts import plot_reservas_emergencia, plot_origen_gas, plot_lng_utilization
 
 
 # Configuración de la página (debe ser la primera llamada a st)
@@ -198,7 +198,7 @@ def panel_brent() -> None:
     )
 
 def panel_reservas_eu_gas() -> None:
-    """Panel autocontenido para las reservas de gas subterráneo en España."""
+    """Panel autocontenido para las reservas de gas subterráneo en Europa."""
     st.subheader("Reservas de gas en Europa — comparativa por año (AGSI+)")
     
     # Inicialización temporal del cliente GIE (usando variables de entorno locales)
@@ -243,7 +243,33 @@ def panel_reservas_eu_gas() -> None:
         hovertemplate="<b>Año %{fullData.name}</b><br>Fecha: %{x|%d-%b}<br>Nivel: %{y:.2f} %<extra></extra>"
     )
     st.plotly_chart(fig, width='stretch')
-        
+
+def panel_llegada_gas()  -> None: 
+    """Panel autocontenido para las reservas de gas subterráneo en España."""
+    st.subheader("Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)")
+    st.caption(
+    "Los tanques de las terminales solo se rellenan cuando descarga un metanero. "
+    "El diente de sierra es el pulso de llegada de barcos: si se aplana, dejan de "
+    "llegar cargamentos — y se ve el mismo día, no con los ~3 meses de desfase del "
+    "panel de origen del gas."
+    )
+    # Inicialización temporal del cliente GIE (usando variables de entorno locales)
+
+    api_key = st.secrets["GIE_API_KEY"]
+    client_gie = get_client(api_key=api_key)
+    
+    # 1. Extracción (Bruto) - Filtramos por Europa "EU"
+    df_bruto = fetch_lng(client_gie, "EU")
+    
+    # 2. Transformación (Significado del dato)
+    df_limpio = transform_gas(df_bruto)
+
+    # 3. Gráfico
+    st.plotly_chart(plot_lng_utilization(df_limpio,  title_zona="UE"),
+                width='stretch')
+
+
+
 def panel_portwatch() -> None:
     """Panel estrella: Tránsito de petroleros en el Estrecho de Ormuz."""
     st.subheader("Flujos Marítimos: Estrecho de Ormuz (IMF PortWatch)")
@@ -503,7 +529,7 @@ def main() -> None:
     "¿Cómo de expuesto está el suministro energético europeo al cierre del "
     "Estrecho de Ormuz, y cuánto colchón queda? Dashboard de seguridad "
     "energética con datos físicos verificables — flujos marítimos, Brent, "
-    "reservas de crudo y gas — de IMF PortWatch, EIA, GIE AGSI+ y Eurostat, "
+    "reservas de crudo y gas, llegada de GNL — de IMF PortWatch, EIA, GIE AGSI+/ALSI y Eurostat, "
     "actualizados automáticamente desde el inicio del conflicto (28-feb-2026)."
     )
     # --- PASO 1: El estrecho de Ormuz ---
@@ -515,16 +541,19 @@ def main() -> None:
     # --- PASO 3: Reservas de gas EU ---
     panel_reservas_eu_gas()
 
-    # --- PASO 4: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
+    # --- PASO 4: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
+    panel_llegada_gas()
+
+    # --- PASO 5: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
     panel_reservas_emergencia()
 
-    # --- PASO 5: Origen del gas importado (Eurostat nrg_ti_gasm) ---
+    # --- PASO 6: Origen del gas importado (Eurostat nrg_ti_gasm) ---
     panel_origen_gas()
 
-    # --- PASO 6: Nivel de existencias de producto en EEUU (EIA semanal) ---
+    # --- PASO 7: Nivel de existencias de producto en EEUU (EIA semanal) ---
     panel_nivel_producto_us()
 
-    # --- PASO 7: Metodología
+    # --- PASO 8: Metodología
     with st.expander("📋 Metodología y limitaciones"):
         st.markdown("""
         **Fuentes y frecuencias**
