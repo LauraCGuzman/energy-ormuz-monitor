@@ -228,6 +228,7 @@ def panel_reservas_eu_gas() -> None:
             "fecha_normalizada": "Fecha [Día/Mes]", 
             "color": "Año"
         },
+        render_mode="svg",
         #title="Reservas de gas en Europa — comparativa por año"
     )
     
