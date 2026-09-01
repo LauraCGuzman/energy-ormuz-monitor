@@ -1,4 +1,5 @@
 import pandas as pd
+from gie.agsi_mappings import AGSICountry
 
 
 def transform_eia(data):
@@ -48,6 +49,23 @@ def transform_gas(data):
     # 2. Eliminar gasDayEnd por redundancia (el índice ya es gasDayStart)
     df.drop(columns=["gasDayEnd"], errors="ignore", inplace=True)
 
+    # 2.1. Guardia contra huecos de captura de AGSI+: algún día suelto llega con
+    # un valor de gasInStorage muy alejado del día anterior Y del siguiente,
+    # que además coinciden EXACTAMENTE entre sí (mismo decimal antes y
+    # después). Físicamente eso no pasa — una caída y recuperación reales no
+    # devuelven el stock al mismo dato exacto — así que es un hueco de
+    # captura, no un vaciado real. Comprobado en Suecia (2023-02-28,
+    # 2023-03-02, 2023-03-28, 2024-06-23 — el almacén de Skallen es minúsculo
+    # y algún día no reporta o llega a 0), ausente en el resto de países.
+    if "gasInStorage" in df.columns and "full" in df.columns:
+        stock = df["gasInStorage"]
+        anterior = stock.shift(1)
+        siguiente = stock.shift(-1)
+        mismo_entorno = (anterior - siguiente).abs() < 1e-9
+        lejos_del_entorno = (stock - anterior).abs() > 0.2 * anterior.abs().clip(lower=1e-9)
+        hueco = mismo_entorno & lejos_del_entorno & anterior.notna() & siguiente.notna()
+        df.loc[hueco, "full"] = float("nan")
+
     # 3. Columna año real para agrupar/colorear
     df["año"] = df.index.year
 
@@ -73,6 +91,26 @@ NOMBRES_PAISES_UE = {
 }
 
 NOMBRES_GEO = {**NOMBRES_PAISES_UE, 'EU27_2020': '🇪🇺 Unión Europea (UE-27)'}
+
+# Países UE-27 con almacenamiento subterráneo de gas cubierto por AGSI+.
+# Se deriva del enum de la librería (no se hardcodea a mano) para no
+# desincronizarse si gie-py amplía su cobertura. Quedan fuera CY, EE, EL,
+# FI, LT, LU, MT y SI: no tienen almacenamiento subterráneo, así que AGSI+
+# no publica datos suyos (mismo caveat que ALSI con las terminales de GNL).
+_CODIGOS_AGSI = {c.value for c in AGSICountry}
+
+# IE (Irlanda) sí está en el enum de gie-py, pero comprobado empíricamente
+# AGSI+ solo tiene 25 días de datos suyos en toda su historia, todos de
+# abril de 2016 (el almacén de Kinsale Energy dejó de reportarse). La
+# excluimos aparte porque el enum no refleja que, en la práctica, nunca hay
+# datos para el rango de fechas (2022+) que usa este panel.
+_SIN_DATOS_UTILES_AGSI = {'IE'}
+
+NOMBRES_PAISES_AGSI = {
+    cod: nombre for cod, nombre in NOMBRES_PAISES_UE.items()
+    if cod in _CODIGOS_AGSI and cod not in _SIN_DATOS_UTILES_AGSI
+}
+NOMBRES_GEO_AGSI = {**NOMBRES_PAISES_AGSI, 'EU': '🇪🇺 Unión Europea (UE-27)'}
 
 
 def transform_reservas_emergencia(df: "pd.DataFrame") -> "pd.DataFrame":

@@ -27,7 +27,8 @@ from data.portwatch_client import fetch_chokepoint_flows
 from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
     transform_reservas_emergencia, transform_origen_gas,
-    NOMBRES_PAISES_UE, NOMBRES_GEO, calcular_autonomias_spr, EstadoSPR
+    NOMBRES_PAISES_UE, NOMBRES_GEO, NOMBRES_GEO_AGSI,
+    calcular_autonomias_spr, EstadoSPR
 )
 from data.eurostat_client import (
     fetch_reservas_emergencia, fetch_origen_gas,
@@ -197,47 +198,67 @@ def panel_brent() -> None:
         "(destilado y jet), no representada en este panel."
     )
 
+@st.fragment
 def panel_reservas_eu_gas() -> None:
-    """Panel autocontenido para las reservas de gas subterráneo en Europa."""
+    """Panel interactivo: reservas de gas subterráneo por país o agregado UE-27 (AGSI+)."""
     st.subheader("Reservas de gas en Europa — comparativa por año (AGSI+)")
-    
-    # Inicialización temporal del cliente GIE (usando variables de entorno locales)
 
+    # Inicialización temporal del cliente GIE (usando variables de entorno locales)
     api_key = st.secrets["GIE_API_KEY"]
     client_gie = get_client(api_key=api_key)
-    
-    # 1. Extracción (Bruto) - Filtramos por Europa "EU"
-    df_bruto = fetch_gas_storage(client_gie, "EU")
-    
-    # 2. Transformación (Significado del dato)
-    df_limpio = transform_gas(df_bruto)
-    
-    # 3. Renderizado (Visualización)
-    # Nota: El índice temporal de GIE es 'gasDayStart'
 
-    # Mostrar el gráfico interactivo
-    # 3. Renderizado (Visualización)
-    # Mostrar el gráfico interactivo
+    # 1. Desplegable: UE primero, luego países con almacenamiento subterráneo (alfabético).
+    # AGSI+ solo cubre países con almacenamiento subterráneo de gas: CY, EE, EL, FI,
+    # LT, LU, MT y SI quedan fuera porque no tienen instalaciones (NOMBRES_GEO_AGSI).
+    codigos_paises = sorted(
+        [c for c in NOMBRES_GEO_AGSI if c != 'EU'],
+        key=lambda c: NOMBRES_GEO_AGSI[c]
+    )
+    opciones = [(NOMBRES_GEO_AGSI['EU'], 'EU')] + [
+        (NOMBRES_GEO_AGSI[c], c) for c in codigos_paises
+    ]
+    nombres_display = [nombre for nombre, _ in opciones]
+    codigos = [cod for _, cod in opciones]
+
+    idx_es = codigos.index('ES') if 'ES' in codigos else 0
+    seleccion = st.selectbox(
+        "País:", nombres_display, index=idx_es, key="sel_reservas_eu_gas"
+    )
+    geo = codigos[nombres_display.index(seleccion)]
+    geo_nombre = NOMBRES_GEO_AGSI.get(geo, geo)
+
+    # 2. Extracción (Bruto) - Filtramos por el país/agregado seleccionado
+    df_bruto = fetch_gas_storage(client_gie, geo)
+
+    # 3. Transformación (Significado del dato)
+    df_limpio = transform_gas(df_bruto)
+
+    if df_limpio.empty:
+        st.warning(f"No hay datos de reservas de gas para {geo_nombre}.")
+        return
+
+    # 4. Renderizado (Visualización)
+    # Nota: El índice temporal de GIE es 'gasDayStart'
     fig = px.line(
-        df_limpio, 
+        df_limpio,
         x="fecha_normalizada",  # Usamos la nueva columna de fechas alineadas
-        y="full", 
+        y="full",
         color=df_limpio["año"].astype(str),
         labels={
-            "full": "Nivel de llenado de gas [%]", 
-            "fecha_normalizada": "Fecha [Día/Mes]", 
+            "full": "Nivel de llenado de gas [%]",
+            "fecha_normalizada": "Fecha [Día/Mes]",
             "color": "Año"
         },
         render_mode="svg",
-        #title="Reservas de gas en Europa — comparativa por año"
+        title=f"Reservas de gas — {geo_nombre}",
     )
-    
+
     # BONUS COSMÉTICO: Ajustar el eje X y el formato del hover
     fig.update_xaxes(
         tickformat="%b",        # Muestra solo el nombre corto del mes (ene, feb, mar...) en el eje
         dtick="M1"             # Fuerza a que haya una marca por cada mes
     )
-    
+
     fig.update_traces(
         # Cambiamos el comportamiento del hover para que muestre el día y mes real,
         # junto con el año real que viene de la leyenda de colores, ocultando el 2024 fantasma.
@@ -245,7 +266,18 @@ def panel_reservas_eu_gas() -> None:
     )
     st.plotly_chart(fig, width='stretch')
 
-def panel_llegada_gas()  -> None: 
+    # 5. Nota metodológica: el nivel de llenado puede superar el 100% real
+    st.info(
+        "⚠️ **Nota:** El nivel de llenado puede superar puntualmente el 100%. AGSI+ lo calcula "
+        "como stock físico / volumen técnico útil (*working gas volume*), y este segundo valor lo "
+        "revisa el operador de tanto en tanto — normalmente al cambio de temporada — sin recalcular "
+        "el histórico. Si la revisión es a la baja y el stock del momento ya la superaba, el "
+        "porcentaje salta por encima de 100% aunque el gas almacenado no haya cambiado. Es un "
+        "artefacto de la fuente (más frecuente en Portugal, Bélgica, Rumanía, Suecia y Polonia), no "
+        "un error de cálculo de este panel."
+    )
+
+def panel_llegada_gas()  -> None:
     """Panel autocontenido para las reservas de gas subterráneo en España."""
     st.subheader("Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)")
     st.caption(
