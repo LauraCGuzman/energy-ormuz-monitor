@@ -3,9 +3,10 @@
 Tres estados distintos en `panel_reservas_eu_gas` (app.py): (1) país sin
 datos — `NoMatchingDataError`, `st.warning` propio; (2) columna `full`
 ausente — esquema roto; (3) `full` presente pero íntegramente NaN — dato
-inservible. (2) y (3) comparten el mismo texto de `st.error` de cara al
-usuario (distinguirlos en pantalla no ayudaba a nadie), pero siguen siendo
-dos `logging.error` distintos, con el detalle técnico completo cada uno.
+inservible. (2) y (3) comparten el mismo texto literal de `st.error` de
+cara al usuario —genérico, sin distinguir "ausente" de "íntegramente
+NaN"— pero siguen siendo dos `logging.error` distintos, con el detalle
+técnico completo cada uno.
 Un NaN parcial en `full` NO es ninguno de los tres: es `_capa_vecinos`
 funcionando como toca, y no lleva aviso.
 

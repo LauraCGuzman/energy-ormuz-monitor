@@ -252,8 +252,8 @@ def panel_reservas_eu_gas() -> None:
     # logging.error de cada rama, con el detalle completo. Dos avisos casi
     # idénticos en pantalla no ayudan a nadie a distinguir nada; el log sí.
     mensaje_full_inservible = (
-        f"⚠️ Los datos de {geo_nombre} llegaron incompletos. No es que no haya reservas "
-        "registradas: es un problema en la fuente de datos. Registrado en el log."
+        f"No se han podido cargar los datos de {geo_nombre}. La fuente ha devuelto "
+        "información incompleta. Vuelve a intentarlo más tarde."
     )
 
     # 3.1. `full` es la columna que dibuja el gráfico. Su ausencia con filas
