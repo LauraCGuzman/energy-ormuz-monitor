@@ -246,6 +246,22 @@ def panel_reservas_eu_gas() -> None:
         st.warning(f"No hay datos de reservas de gas para {geo_nombre}.")
         return
 
+    # 3.1. `full` es la columna que dibuja el gráfico. Su ausencia con filas
+    # ya presentes no es "país sin cobertura" (eso ya lo cortó el .empty de
+    # arriba) — es un cambio de esquema de AGSI+ o un dato corrupto, así que
+    # se distingue con un mensaje propio, no el st.warning de "sin datos".
+    if "full" not in df_limpio.columns:
+        logging.error(
+            "[gie/gas_storage] %s: faltan datos de nivel de llenado ('full') en la respuesta de AGSI+",
+            geo,
+        )
+        st.error(
+            f"⚠️ Los datos de {geo_nombre} llegaron incompletos — falta el nivel de llenado "
+            "('full'). No es que no haya reservas registradas: es un fallo de la fuente o un "
+            "cambio de esquema en la API. Registrado en el log."
+        )
+        return
+
     # 4. Renderizado (Visualización)
     # Nota: El índice temporal de GIE es 'gasDayStart'
     fig = px.line(

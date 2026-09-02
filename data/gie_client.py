@@ -11,7 +11,10 @@ Decisiones de diseño:
     - Las funciones devuelven `pandas.DataFrame` ya tipados y con índice temporal.
     - El cliente se crea una vez por sesión (cacheable con `st.cache_resource`).
     - Los errores de red o de API se propagan al caller; el dashboard decide
-      cómo presentarlos al usuario.
+      cómo presentarlos al usuario. Única excepción: `NoMatchingDataError`
+      (país sin ningún dato en el rango pedido, no un fallo) se captura en
+      `fetch_gas_storage` y se convierte en un DataFrame vacío — es ausencia
+      de datos, no una caída de red ni un bug, y así lo distingue el panel.
 """
 # from gie.agsi_mappings import AGSICountry
 # from gie.alsi_mappings import ALSICountry
@@ -25,8 +28,11 @@ Decisiones de diseño:
 # LNG_COUNTRIES = [c for c in ALSICountry if c != ALSICountry.EU]
 # LNG_COUNTRIES_EU_AGGREGATE = ALSICountry.EU
 
+import logging
+
 import pandas as pd
 from gie import GiePandasClient
+from gie.exceptions import NoMatchingDataError
 import streamlit as st
 
 
@@ -61,11 +67,33 @@ def fetch_gas_storage(
 
     Returns:
         DataFrame con columnas: gasInStorage, full (%), trend, injection, withdrawal.
-        Índice: fecha (datetime).
+        Índice: fecha (datetime). Vacío (sin columnas) si AGSI+ no tiene ni un
+        solo dato para `country` en `[start, end]` — ver `NoMatchingDataError`
+        abajo. El panel decide qué mostrar ante un DataFrame vacío.
     """
     if end is None:
         end = pd.Timestamp.today().strftime("%Y-%m-%d")
-    return _client.query_gas_country(country=country, start=start, end=end)
+    try:
+        return _client.query_gas_country(country=country, start=start, end=end)
+    except NoMatchingDataError:
+        # País sin ningún dato en el rango pedido (p.ej. uno sin almacenamiento
+        # activo, o fuera de la cobertura real de AGSI+ pese a estar en el
+        # enum de la librería). No es un fallo de red ni de la API: es
+        # ausencia de datos, y el panel ya sabe leer un DataFrame vacío
+        # (ver `panel_reservas_eu_gas`, `if df_limpio.empty`). Cualquier otra
+        # excepción (timeout, red, autenticación) se deja propagar tal cual.
+        #
+        # El índice tiene que ser un DatetimeIndex vacío, no el RangeIndex
+        # por defecto de `pd.DataFrame()`: `transform_gas` hace
+        # `df.index.year` incondicionalmente, y eso revienta con
+        # `AttributeError` sobre un RangeIndex — cambiaría un traceback por
+        # otro en vez de evitarlo. Mismo nombre de índice que devuelve
+        # `query_gas_country` en el caso real (gasDayStart), por consistencia.
+        logging.warning(
+            "[gie/gas_storage] %s: sin datos en AGSI+ para %s..%s (NoMatchingDataError)",
+            country, start, end,
+        )
+        return pd.DataFrame(index=pd.DatetimeIndex([], name="gasDayStart"))
 
 @st.cache_data(ttl=3600)
 
