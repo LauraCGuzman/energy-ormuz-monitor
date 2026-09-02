@@ -1,15 +1,22 @@
 """Tests de `data.gie_client.fetch_gas_storage`: manejo de `NoMatchingDataError`.
 
-«País sin datos» y «datos rotos» son dos fallos distintos (ver
-`app.py::panel_reservas_eu_gas`). Este módulo solo cubre el primero, en la
-capa de datos: `fetch_gas_storage` debe convertir `NoMatchingDataError` —y
-solo esa excepción— en un DataFrame vacío, dejando cualquier otra (timeout,
-red, autenticación) propagarse sin tocar.
+Tres estados distintos en `panel_reservas_eu_gas` (app.py), cada uno con su
+propio mensaje: (1) país sin datos — `NoMatchingDataError`, `st.warning`;
+(2) columna `full` ausente — esquema roto, `st.error`; (3) `full` presente
+pero íntegramente NaN — dato inservible, `st.error` distinto del anterior.
+Un NaN parcial en `full` NO es ninguno de los tres: es `_capa_vecinos`
+funcionando como toca, y no lleva aviso.
 
-El caso de la columna `full` ausente vive en `panel_reservas_eu_gas`
+Este módulo solo cubre el (1), en la capa de datos: `fetch_gas_storage` debe
+convertir `NoMatchingDataError` —y solo esa excepción— en un DataFrame
+vacío, dejando cualquier otra (timeout, red, autenticación) propagarse sin
+tocar.
+
+Los casos (2) y (3) viven enteros dentro de `panel_reservas_eu_gas`
 (app.py), que no es testeable sin arrancar Streamlit de verdad
-(`st.selectbox`, `st.secrets`, `st.error` necesitan un script run real) —
-no se fuerza un test artificial para eso; se verificó a mano (ver PR).
+(`st.selectbox`, `st.secrets`, `st.error` necesitan un script run real, y
+mockear cada llamada de Streamlit para llegar a un `if` sería un test
+artificial, no una verificación) — se verificaron a mano (ver PR).
 """
 
 import unittest

@@ -262,6 +262,23 @@ def panel_reservas_eu_gas() -> None:
         )
         return
 
+    # 3.2. `full` existe pero puede venir ÍNTEGRAMENTE a NaN (dato inservible,
+    # no ausente). Ojo: NO es lo mismo que un NaN parcial — eso es
+    # `_capa_vecinos` funcionando como toca (anula días puntuales de stock
+    # anómalo) y avisar de eso sería ruido. Solo el caso íntegro deja el
+    # gráfico en blanco sin que nada lo señale.
+    if df_limpio["full"].isna().all():
+        logging.error(
+            "[gie/gas_storage] %s: 'full' presente pero íntegramente NaN (%d filas)",
+            geo, len(df_limpio),
+        )
+        st.error(
+            f"⚠️ Los datos de {geo_nombre} llegaron sin ningún valor útil de nivel de llenado "
+            "— la columna existe pero está vacía entera. No es un país sin cobertura ni un "
+            "cambio de esquema: es un dato inservible de la fuente. Registrado en el log."
+        )
+        return
+
     # 4. Renderizado (Visualización)
     # Nota: El índice temporal de GIE es 'gasDayStart'
     fig = px.line(
