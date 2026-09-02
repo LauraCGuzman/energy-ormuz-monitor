@@ -246,6 +246,16 @@ def panel_reservas_eu_gas() -> None:
         st.warning(f"No hay datos de reservas de gas para {geo_nombre}.")
         return
 
+    # Ambos guardias de abajo (full ausente / full íntegramente NaN) muestran
+    # el mismo texto al usuario — la distinción técnica entre "falta la
+    # columna" y "la columna existe pero es inservible" sigue viva en el
+    # logging.error de cada rama, con el detalle completo. Dos avisos casi
+    # idénticos en pantalla no ayudan a nadie a distinguir nada; el log sí.
+    mensaje_full_inservible = (
+        f"⚠️ Los datos de {geo_nombre} llegaron incompletos. No es que no haya reservas "
+        "registradas: es un problema en la fuente de datos. Registrado en el log."
+    )
+
     # 3.1. `full` es la columna que dibuja el gráfico. Su ausencia con filas
     # ya presentes no es "país sin cobertura" (eso ya lo cortó el .empty de
     # arriba) — es un cambio de esquema de AGSI+ o un dato corrupto, así que
@@ -255,11 +265,7 @@ def panel_reservas_eu_gas() -> None:
             "[gie/gas_storage] %s: faltan datos de nivel de llenado ('full') en la respuesta de AGSI+",
             geo,
         )
-        st.error(
-            f"⚠️ Los datos de {geo_nombre} llegaron incompletos — falta el nivel de llenado "
-            "('full'). No es que no haya reservas registradas: es un fallo de la fuente o un "
-            "cambio de esquema en la API. Registrado en el log."
-        )
+        st.error(mensaje_full_inservible)
         return
 
     # 3.2. `full` existe pero puede venir ÍNTEGRAMENTE a NaN (dato inservible,
@@ -272,11 +278,7 @@ def panel_reservas_eu_gas() -> None:
             "[gie/gas_storage] %s: 'full' presente pero íntegramente NaN (%d filas)",
             geo, len(df_limpio),
         )
-        st.error(
-            f"⚠️ Los datos de {geo_nombre} llegaron sin ningún valor útil de nivel de llenado "
-            "— la columna existe pero está vacía entera. No es un país sin cobertura ni un "
-            "cambio de esquema: es un dato inservible de la fuente. Registrado en el log."
-        )
+        st.error(mensaje_full_inservible)
         return
 
     # 4. Renderizado (Visualización)
