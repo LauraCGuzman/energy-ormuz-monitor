@@ -231,7 +231,7 @@ def panel_reservas_eu_gas() -> None:
     df_bruto = fetch_gas_storage(client_gie, geo)
 
     # 3. Transformación (Significado del dato)
-    df_limpio = transform_gas(df_bruto)
+    df_limpio = transform_gas(df_bruto, pais=geo)
 
     if df_limpio.empty:
         st.warning(f"No hay datos de reservas de gas para {geo_nombre}.")
@@ -293,9 +293,9 @@ def panel_llegada_gas()  -> None:
     
     # 1. Extracción (Bruto) - Filtramos por Europa "EU"
     df_bruto = fetch_lng(client_gie, "EU")
-    
+
     # 2. Transformación (Significado del dato)
-    df_limpio = transform_gas(df_bruto)
+    df_limpio = transform_gas(df_bruto, pais="EU")
 
     # 3. Gráfico
     st.plotly_chart(plot_lng_utilization(df_limpio,  title_zona="UE"),

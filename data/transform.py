@@ -1,5 +1,106 @@
+import logging
+
 import pandas as pd
 from gie.agsi_mappings import AGSICountry
+
+COLUMNA_CAPACIDAD_GAS = "workingGasVolume"
+COLUMNA_STOCK_GAS = "gasInStorage"
+COLUMNA_LLENADO_GAS = "full"
+
+
+def _formatear_fechas(indice):
+    """`YYYY-MM-DD` de cada fecha del índice; si son más de 5, las 3 primeras y el total."""
+    fechas = [f.strftime("%Y-%m-%d") for f in indice]
+    if len(fechas) <= 5:
+        return ", ".join(fechas)
+    return ", ".join(fechas[:3]) + f", … ({len(fechas)} en total)"
+
+
+def _capa_capacidad(df, pais):
+    """Capa 1 de calidad: descarta la fila entera si `workingGasVolume` es 0 o NaN.
+
+    `gie-py` convierte el '-' de la API en 0, no en NaN (`_fix_dataframe`),
+    así que un hueco de reporte es indistinguible por tipo de un cero real.
+
+    El discriminador es `workingGasVolume`: un país con almacenamiento nunca
+    tiene capacidad 0 — es imposible por definición, no improbable. Si la
+    capacidad es 0 o NaN, ese día no se reportó y la fila entera se cae.
+
+    `full` y `gasInStorage` NO se tocan aquí: un 0 real tiene que seguir
+    viéndose (caso de los días de Suecia con stock genuinamente bajo).
+    """
+    if COLUMNA_CAPACIDAD_GAS not in df.columns:
+        # transform_gas también sirve a ALSI (GNL), que no tiene esta
+        # columna: ausencia esperada por la fuente, no una anomalía — no-op
+        # silencioso, sin aviso.
+        return df
+
+    capacidad = pd.to_numeric(df[COLUMNA_CAPACIDAD_GAS], errors="coerce")
+    valido = capacidad.notna() & (capacidad > 0)
+
+    descartadas = df.index[~valido]
+    if len(descartadas):
+        n = len(descartadas)
+        logging.warning(
+            "[calidad_gas/capacidad] %s: %d fila%s descartada%s por workingGasVolume<=0 o NaN — %s",
+            pais, n, "" if n == 1 else "s", "" if n == 1 else "s", _formatear_fechas(descartadas),
+        )
+
+    return df.loc[valido]
+
+
+def _capa_vecinos(df, pais):
+    """Capa 2 de calidad: anula solo `full` en los días con `gasInStorage`
+    anómalo respecto a sus vecinos cronológicos inmediatos.
+
+    Actúa sobre lo que sobrevive a `_capa_capacidad`. Un día suelto puede
+    llegar con un valor de `gasInStorage` muy alejado del día anterior Y del
+    siguiente, que además coinciden EXACTAMENTE entre sí (mismo decimal antes
+    y después). Físicamente eso no pasa — una caída y recuperación reales no
+    devuelven el stock al mismo dato exacto — así que es un hueco de
+    captura, no un vaciado real.
+    """
+    if COLUMNA_STOCK_GAS not in df.columns or COLUMNA_LLENADO_GAS not in df.columns:
+        # transform_gas también sirve a ALSI (GNL), que no tiene
+        # 'gasInStorage' (tiene 'lngInventory' en su lugar): ausencia
+        # esperada por la fuente, no una anomalía — no-op silencioso, sin aviso.
+        return df
+
+    stock = df[COLUMNA_STOCK_GAS]
+    anterior = stock.shift(1)
+    siguiente = stock.shift(-1)
+    mismo_entorno = (anterior - siguiente).abs() < 1e-9
+    lejos_del_entorno = (stock - anterior).abs() > 0.2 * anterior.abs().clip(lower=1e-9)
+    hueco = mismo_entorno & lejos_del_entorno & anterior.notna() & siguiente.notna()
+
+    afectadas = df.index[hueco]
+    if len(afectadas):
+        n = len(afectadas)
+        logging.warning(
+            "[calidad_gas/vecinos] %s: %d valor%s de 'full' anulado%s por stock anómalo — %s",
+            pais, n, "es" if n != 1 else "", "s" if n != 1 else "", _formatear_fechas(afectadas),
+        )
+
+    df.loc[hueco, COLUMNA_LLENADO_GAS] = float("nan")
+    return df
+
+
+def _calidad_gas(df, pais):
+    """Aplica las dos capas de calidad de AGSI+ en orden fijo. Devuelve el df filtrado.
+
+    Orden fijo y no negociable: capacidad primero (descarta filas), vecinos
+    después, sobre lo que sobrevive a la capacidad (anula solo `full`). El
+    orden importa: la capa de capacidad cambia quiénes son los vecinos
+    cronológicos de cada día para la capa de vecinos.
+
+    `transform_gas` sirve tanto a AGSI (reservas) como a ALSI (GNL); ALSI no
+    tiene las columnas de ninguna capa, así que ambas no-opean en silencio
+    (ver `_capa_capacidad` / `_capa_vecinos`) — no es una coincidencia entre
+    capas, cada una lo comprueba por su cuenta.
+    """
+    df = _capa_capacidad(df, pais)
+    df = _capa_vecinos(df, pais)
+    return df
 
 
 def transform_eia(data):
@@ -42,29 +143,26 @@ def transform_portwatch(data):
     return df
 
 
-def transform_gas(data):
+def transform_gas(data, pais="?"):
     # 1. Copiar para evitar mutación
     df = data.copy()
 
     # 2. Eliminar gasDayEnd por redundancia (el índice ya es gasDayStart)
     df.drop(columns=["gasDayEnd"], errors="ignore", inplace=True)
 
-    # 2.1. Guardia contra huecos de captura de AGSI+: algún día suelto llega con
-    # un valor de gasInStorage muy alejado del día anterior Y del siguiente,
-    # que además coinciden EXACTAMENTE entre sí (mismo decimal antes y
-    # después). Físicamente eso no pasa — una caída y recuperación reales no
-    # devuelven el stock al mismo dato exacto — así que es un hueco de
-    # captura, no un vaciado real. Comprobado en Suecia (2023-02-28,
-    # 2023-03-02, 2023-03-28, 2024-06-23 — el almacén de Skallen es minúsculo
-    # y algún día no reporta o llega a 0), ausente en el resto de países.
-    if "gasInStorage" in df.columns and "full" in df.columns:
-        stock = df["gasInStorage"]
-        anterior = stock.shift(1)
-        siguiente = stock.shift(-1)
-        mismo_entorno = (anterior - siguiente).abs() < 1e-9
-        lejos_del_entorno = (stock - anterior).abs() > 0.2 * anterior.abs().clip(lower=1e-9)
-        hueco = mismo_entorno & lejos_del_entorno & anterior.notna() & siguiente.notna()
-        df.loc[hueco, "full"] = float("nan")
+    # 2.1. `query_gas_country`/`query_lng_country` devuelven gasDayStart en
+    # orden DESCENDENTE (más reciente primero), sin ordenar — comprobado en
+    # el índice crudo. No se nota en el gráfico (una serie monótona, aunque
+    # invertida, sigue dibujando una línea limpia), pero las capas de calidad
+    # de abajo comparan cada fila con su vecino real en el calendario, así
+    # que necesitan orden cronológico explícito. Mismo motivo por el que el
+    # suavizado de PortWatch se movió detrás del sort_index el 23/6.
+    df = df.sort_index()
+
+    # 2.2. Calidad AGSI+: dos capas en orden fijo, capacidad y vecinos (ver
+    # `_calidad_gas`). No-op silencioso para datos de ALSI (panel de GNL),
+    # que no tiene las columnas de ninguna de las dos.
+    df = _calidad_gas(df, pais)
 
     # 3. Columna año real para agrupar/colorear
     df["año"] = df.index.year
