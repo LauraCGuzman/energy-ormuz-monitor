@@ -40,12 +40,13 @@ class TestFormatearFechas(unittest.TestCase):
         self.assertEqual(_formatear_fechas(idx), "2023-01-01, 2023-01-02")
 
     def test_mas_de_cinco_trunca_a_las_tres_primeras_mas_el_total(self):
+        # Comparación de string completo: separador ASCII ("...", no "…")
+        # por el mismo motivo que el "-" de los avisos.
         idx = pd.DatetimeIndex(pd.date_range("2023-01-01", periods=7))
-        resultado = _formatear_fechas(idx)
-        self.assertTrue(
-            resultado.startswith("2023-01-01, 2023-01-02, 2023-01-03")
+        self.assertEqual(
+            _formatear_fechas(idx),
+            "2023-01-01, 2023-01-02, 2023-01-03, ... (7 en total)",
         )
-        self.assertIn("7 en total", resultado)
 
 
 class TestCapaCapacidad(unittest.TestCase):
@@ -62,10 +63,13 @@ class TestCapaCapacidad(unittest.TestCase):
         self.assertEqual(
             list(resultado.index.strftime("%Y-%m-%d")), ["2023-01-01"]
         )
-        self.assertIn(
-            "[calidad_gas/capacidad] SE: 2 filas descartadas", cm.output[0]
+        # Comparación de string completo: fija el separador ASCII ("-", no
+        # "—") para que el mensaje no se rompa en la consola de Windows.
+        self.assertEqual(
+            cm.output[0],
+            "WARNING:root:[calidad_gas/capacidad] SE: 2 filas descartadas "
+            "por workingGasVolume<=0 o NaN - 2023-01-02, 2023-01-03",
         )
-        self.assertIn("2023-01-02, 2023-01-03", cm.output[0])
 
     def test_no_opera_ni_avisa_sin_columna_de_capacidad(self):
         # Forma ALSI: sin workingGasVolume.
@@ -95,10 +99,13 @@ class TestCapaVecinos(unittest.TestCase):
         self.assertTrue(pd.isna(resultado.loc["2023-01-02", "full"]))
         self.assertEqual(resultado.loc["2023-01-01", "full"], 50.0)
         self.assertEqual(resultado.loc["2023-01-03", "full"], 50.0)
-        self.assertIn(
-            "[calidad_gas/vecinos] SE: 1 valor de 'full' anulado", cm.output[0]
+        # Comparación de string completo: fija el separador ASCII ("-", no
+        # "—") para que el mensaje no se rompa en la consola de Windows.
+        self.assertEqual(
+            cm.output[0],
+            "WARNING:root:[calidad_gas/vecinos] SE: 1 valor de 'full' "
+            "anulado por stock anómalo - 2023-01-02",
         )
-        self.assertIn("2023-01-02", cm.output[0])
 
     def test_no_opera_ni_avisa_sin_columnas_de_vecinos(self):
         # Forma ALSI: sin gasInStorage (tiene lngInventory) y sin full.

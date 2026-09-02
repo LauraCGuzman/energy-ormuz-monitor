@@ -12,10 +12,19 @@ contexto del conflicto del Estrecho de Ormuz (inicio 28-feb-2026):
 Punto de entrada: `streamlit run app.py`
 """
 
+import logging
+
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+# Configuración mínima de logging: el proyecto no tenía ninguna. Sin esto los
+# `logging.warning` de las capas de calidad de `transform_gas` (ver
+# data/transform.py) caen en el handler `lastResort` de Python, que ya
+# imprime a stderr por su cuenta — esto solo fija nivel y formato explícitos
+# en vez de dejarlo al default implícito.
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 
 # Imports de extracción y transformación (asumiendo estructura de paquete 'data')
 from data.eia_client import (

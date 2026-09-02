@@ -13,7 +13,7 @@ def _formatear_fechas(indice):
     fechas = [f.strftime("%Y-%m-%d") for f in indice]
     if len(fechas) <= 5:
         return ", ".join(fechas)
-    return ", ".join(fechas[:3]) + f", … ({len(fechas)} en total)"
+    return ", ".join(fechas[:3]) + f", ... ({len(fechas)} en total)"
 
 
 def _capa_capacidad(df, pais):
@@ -42,7 +42,7 @@ def _capa_capacidad(df, pais):
     if len(descartadas):
         n = len(descartadas)
         logging.warning(
-            "[calidad_gas/capacidad] %s: %d fila%s descartada%s por workingGasVolume<=0 o NaN — %s",
+            "[calidad_gas/capacidad] %s: %d fila%s descartada%s por workingGasVolume<=0 o NaN - %s",
             pais, n, "" if n == 1 else "s", "" if n == 1 else "s", _formatear_fechas(descartadas),
         )
 
@@ -77,7 +77,7 @@ def _capa_vecinos(df, pais):
     if len(afectadas):
         n = len(afectadas)
         logging.warning(
-            "[calidad_gas/vecinos] %s: %d valor%s de 'full' anulado%s por stock anómalo — %s",
+            "[calidad_gas/vecinos] %s: %d valor%s de 'full' anulado%s por stock anómalo - %s",
             pais, n, "es" if n != 1 else "", "s" if n != 1 else "", _formatear_fechas(afectadas),
         )
 
