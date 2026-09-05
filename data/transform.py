@@ -143,6 +143,33 @@ def transform_portwatch(data):
     return df
 
 
+# Diccionario único de chokepoints: portid (propiedad del dataset PortWatch,
+# enumerados contra la API el 5/9, ver informe de Fase 0) -> nombre legible.
+# Los seis aprobados para el selector del panel de PortWatch (pliego
+# «selector-chokepoints»). Ormuz es el valor por defecto del panel.
+NOMBRES_CHOKEPOINTS = {
+    'chokepoint6': 'Estrecho de Ormuz',
+    'chokepoint1': 'Canal de Suez',
+    'chokepoint4': 'Bab el-Mandeb',
+    'chokepoint5': 'Estrecho de Malaca',
+    'chokepoint3': 'Estrecho del Bósforo',
+    'chokepoint2': 'Canal de Panamá',
+}
+
+CHOKEPOINT_DEFECTO = 'chokepoint6'
+
+
+def etiqueta_chokepoint(chokepoint_id: str) -> str:
+    """Rótulo legible para un chokepoint, a partir del identificador solicitado.
+
+    Deliberadamente no lee el DataFrame transformado: `transform_portwatch`
+    descarta `portid`/`portname` por ser constantes en un fetch mono-chokepoint
+    (paso 3 de arriba), así que el único origen fiable del rótulo es lo que se
+    pidió, no una columna que ya no existe en el resultado.
+    """
+    return NOMBRES_CHOKEPOINTS.get(chokepoint_id, chokepoint_id)
+
+
 def transform_gas(data, pais="?"):
     # 1. Copiar para evitar mutación
     df = data.copy()

@@ -37,6 +37,7 @@ from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
     transform_reservas_emergencia, transform_origen_gas,
     NOMBRES_PAISES_UE, NOMBRES_GEO, NOMBRES_GEO_AGSI,
+    NOMBRES_CHOKEPOINTS, CHOKEPOINT_DEFECTO, etiqueta_chokepoint,
     calcular_autonomias_spr, EstadoSPR
 )
 from data.eurostat_client import (
@@ -347,15 +348,43 @@ def panel_llegada_gas()  -> None:
 
 
 
+@st.fragment
 def panel_portwatch() -> None:
-    """Panel estrella: Tránsito de petroleros en el Estrecho de Ormuz."""
-    st.subheader("Flujos Marítimos: Estrecho de Ormuz (IMF PortWatch)")
-    
-    # 1. Extracción (Bruto)
-    # El cliente de PortWatch o tu función mapeada para Ormuz
-    df_bruto = fetch_chokepoint_flows("chokepoint6", 2025)
-    
-    # 2. Transformación (limpieza + media móvil 7 días en transform_portwatch)
+    """Panel estrella: Tránsito de buques por chokepoint marítimo (IMF PortWatch).
+
+    Ormuz es el sujeto del monitor y el valor por defecto; el selector añade
+    contexto comparativo con los otros cinco chokepoints aprobados (pliego
+    «selector-chokepoints»), sin convertir el panel en un visor genérico.
+    """
+    # 1. Desplegable: Ormuz primero (valor por defecto), luego el resto alfabético.
+    # Mismo patrón que panel_reservas_eu_gas: el conjunto de opciones sale de
+    # un único diccionario (NOMBRES_CHOKEPOINTS), no de listas paralelas.
+    codigos_resto = sorted(
+        [c for c in NOMBRES_CHOKEPOINTS if c != CHOKEPOINT_DEFECTO],
+        key=lambda c: NOMBRES_CHOKEPOINTS[c]
+    )
+    opciones = [(NOMBRES_CHOKEPOINTS[CHOKEPOINT_DEFECTO], CHOKEPOINT_DEFECTO)] + [
+        (NOMBRES_CHOKEPOINTS[c], c) for c in codigos_resto
+    ]
+    nombres_display = [nombre for nombre, _ in opciones]
+    codigos = [cod for _, cod in opciones]
+
+    idx_defecto = codigos.index(CHOKEPOINT_DEFECTO)
+    seleccion = st.selectbox(
+        "Chokepoint:", nombres_display, index=idx_defecto, key="sel_chokepoint"
+    )
+    chokepoint_id = codigos[nombres_display.index(seleccion)]
+    # El rótulo sale de lo que se pidió, no de una columna del DataFrame: ver
+    # docstring de `etiqueta_chokepoint` (transform_portwatch descarta
+    # portid/portname por ser constantes en un fetch mono-chokepoint).
+    chokepoint_nombre = etiqueta_chokepoint(chokepoint_id)
+
+    st.subheader(f"Flujos Marítimos: {chokepoint_nombre} (IMF PortWatch)")
+
+    # 2. Extracción (Bruto)
+    df_bruto = fetch_chokepoint_flows(chokepoint_id, 2025)
+
+    # 3. Transformación (limpieza + media móvil 7 días en transform_portwatch)
     df_limpio = transform_portwatch(df_bruto)
 
     date_max = max(df_limpio.index).strftime("%d-%m-%Y")
@@ -372,19 +401,21 @@ def panel_portwatch() -> None:
         title="Tránsito Diario de Petroleros (Tankers) — Línea Temporal Continua",
         color_discrete_sequence=["#E63946"]  # Un color que resalte la criticidad
     )
-    
+
     # Ajustes estéticos para marcar el conflicto
     fig.update_xaxes(
         rangeslider_visible=False,
         title_text="Línea de tiempo"
     )
     fig.update_yaxes(title_text="Número de Petroleros / Día")
-    
-    # Añadir línea vertical en la fecha del conflicto (28 de febrero de 2026)
+
+    # Añadir línea vertical en la fecha del conflicto (28 de febrero de 2026).
+    # Evento global, no de un chokepoint concreto: se mantiene igual, con la
+    # misma rotulación neutra, en todos los chokepoints (§4.1 del pliego).
     fig.add_vline(
-        x="2026-02-28", 
-        line_width=2, 
-        line_dash="dash", 
+        x="2026-02-28",
+        line_width=2,
+        line_dash="dash",
         line_color="orange"
     )
     fig.add_annotation(
@@ -399,11 +430,13 @@ def panel_portwatch() -> None:
 
     # Renderizar gráfico
     st.plotly_chart(fig, width='stretch')
-    
+
     # 4.1. Añadir el pie de foto con la fecha máxima y el desfase
     st.caption(f"Datos hasta el {date_max} · Actualización semanal, 2-3 días de desfase")
-    
-    # 5. CONTEXTO CRÍTICO (Disclaimer AIS — Obligatorio §11)
+
+    # 5. CONTEXTO CRÍTICO (Disclaimer AIS — aplica a todo el dataset de
+    # PortWatch, no solo a Ormuz: se mantiene tal cual, sin reformular, en
+    # todos los chokepoints (§4.2 del pliego)).
     st.info(
         "⚠️ **Nota metodológica sobre los datos (Efecto Transpondedor):** "
         "La drástica caída observada en las gráficas refleja los tránsitos detectados mediante el "
