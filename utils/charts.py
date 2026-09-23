@@ -240,7 +240,9 @@ def plot_lng_utilization(
         text="Inicio Conflicto (28-Feb)", showarrow=True, arrowhead=1, ax=60, ay=-15,
     )
 
-    fig.update_yaxes(title_text="<b>Tanques llenos</b> (%)", range=[0, 100], row=1, col=1)
+    llenado_max = d["llenado"].max()
+    top_llenado = 100 if pd.isna(llenado_max) else max(100, llenado_max)
+    fig.update_yaxes(title_text="<b>Tanques llenos</b> (%)", range=[0, top_llenado], row=1, col=1)
     fig.update_yaxes(title_text="<b>Envío a la red</b> (GWh/día)", rangemode="tozero", row=2, col=1)
     fig.update_xaxes(title_text="", row=2, col=1)
 

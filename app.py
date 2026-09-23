@@ -346,6 +346,14 @@ def panel_llegada_gas()  -> None:
     st.plotly_chart(plot_lng_utilization(df_limpio,  title_zona="UE"),
                 width='stretch')
 
+    # 4. Nota metodológica: el nivel de llenado puede superar el 100% real
+    st.info(
+        "⚠️ **Nota:** si el llenado supera el 100%, el eje se amplía para no recortar el dato. "
+        "El porcentaje es el stock físico (*inventory*) dividido por la capacidad máxima declarada "
+        "(*dtmi*) de ALSI+. Un valor por encima del 100% apunta a una revisión de la capacidad "
+        "declarada, no a más gas del que cabe; se muestra tal como lo publica la fuente."
+    )
+
 
 
 @st.fragment
