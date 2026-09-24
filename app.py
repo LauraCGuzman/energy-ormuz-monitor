@@ -46,6 +46,7 @@ from data.eurostat_client import (
 )
 from utils.charts import (
     plot_reservas_emergencia, plot_origen_gas, plot_lng_utilization, plot_hdd_pais,
+    resaltar_serie_mas_reciente,
 )
 
 
@@ -300,6 +301,7 @@ def panel_reservas_eu_gas() -> None:
         render_mode="svg",
         title=f"Reservas de gas — {geo_nombre}",
     )
+    resaltar_serie_mas_reciente(fig)
 
     # BONUS COSMÉTICO: Ajustar el eje X y el formato del hover
     fig.update_xaxes(

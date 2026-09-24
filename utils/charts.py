@@ -14,6 +14,37 @@ from __future__ import annotations
 import pandas as pd
 
 
+def resaltar_serie_mas_reciente(
+    fig,
+    color_reciente: str = "#1D3557",
+    ancho_reciente: float = 3,
+    color_resto: str = "#B0B0B0",
+    ancho_resto: float = 1,
+):
+    """Da color oscuro y grosor 3 a la serie más reciente, gris fino al resto.
+
+    Pensada para figuras con una traza por año o temporada, coloreadas por
+    categoría (`color=serie.astype(str)` en `px.line`). "Más reciente" se
+    decide comparando los nombres de las trazas como enteros — nunca un año
+    fijado a mano, así que sigue funcionando el año que viene sin tocar el
+    código. No toca `trazo.name`: la leyenda y el hover (que suelen leer
+    `fullData.name`) siguen mostrando el año/temporada real de cada línea.
+
+    Args:
+        fig: figura de Plotly (Express o no) con una traza por año/temporada.
+
+    Returns:
+        La misma figura, modificada in-place (y devuelta por comodidad).
+    """
+    mas_reciente = max(fig.data, key=lambda trazo: int(trazo.name)).name
+    for trazo in fig.data:
+        if trazo.name == mas_reciente:
+            trazo.update(line=dict(color=color_reciente, width=ancho_reciente))
+        else:
+            trazo.update(line=dict(color=color_resto, width=ancho_resto))
+    return fig
+
+
 def plot_gas_storage_level(df: pd.DataFrame, title: str = "Nivel de reservas"):
     """Serie temporal del % de llenado de reservas de gas.
 
