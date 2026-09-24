@@ -437,3 +437,98 @@ def calcular_autonomias_spr(df: pd.DataFrame, suelo_tecnico: float = 150000.0) -
         "ritmo_diario": media_descenso_diario,
         "dias_ventana": dias_ventana
     }
+
+
+# ── Grados-día de calefacción (HDD) ──────────────────────────────────────────
+#
+# Índice propio (pliego «panel-hdd»), no una réplica de Eurostat: fórmula de
+# Eurostat aplicada a temperatura diaria de Open-Meteo (ERA5) en 1-3 ciudades
+# por país. Solo llevan entrada aquí los países que pasaron la validación de
+# la Fase 1 (correlación >= 0,98 y rango de sesgo entre inviernos <= 15
+# puntos frente a Eurostat nrg_chdd_m, 2015-16 a 2024-25). Portugal y Suecia
+# no pasaron y quedan fuera a propósito — no tienen gráfico en esta versión.
+CIUDADES_HDD = {
+    'DE': [('Berlín', 52.5200, 13.4050), ('Múnich', 48.1351, 11.5820), ('Hamburgo', 53.5511, 9.9937)],
+    'AT': [('Viena', 48.2082, 16.3738), ('Innsbruck', 47.2692, 11.4041)],
+    'BG': [('Sofía', 42.6977, 23.3219), ('Varna', 43.2141, 27.9147)],
+    'BE': [('Bruselas', 50.8503, 4.3517), ('Amberes', 51.2194, 4.4025)],
+    'CZ': [('Praga', 50.0755, 14.4378), ('Brno', 49.1951, 16.6068)],
+    'HR': [('Zagreb', 45.8150, 15.9819), ('Split', 43.5081, 16.4402)],
+    'DK': [('Copenhague', 55.6761, 12.5683), ('Aarhus', 56.1629, 10.2039)],
+    'SK': [('Bratislava', 48.1486, 17.1077), ('Košice', 48.7164, 21.2611)],
+    'ES': [('Madrid', 40.4168, -3.7038), ('Barcelona', 41.3874, 2.1686), ('Sevilla', 37.3891, -5.9845)],
+    'FR': [('París', 48.8566, 2.3522), ('Marsella', 43.2965, 5.3698), ('Lyon', 45.7640, 4.8357)],
+    'HU': [('Budapest', 47.4979, 19.0402), ('Debrecen', 47.5316, 21.6273)],
+    'IT': [('Milán', 45.4642, 9.1900), ('Roma', 41.9028, 12.4964), ('Palermo', 38.1157, 13.3615)],
+    'LV': [('Riga', 56.9496, 24.1052)],
+    'NL': [('Ámsterdam', 52.3676, 4.9041), ('Róterdam', 51.9244, 4.4777)],
+    'PL': [('Varsovia', 52.2297, 21.0122), ('Cracovia', 50.0647, 19.9450), ('Gdansk', 54.3520, 18.6466)],
+    'RO': [('Bucarest', 44.4268, 26.1025), ('Cluj-Napoca', 46.7712, 23.6236)],
+}
+
+
+def hdd_diario(temperatura_media: pd.Series) -> pd.Series:
+    """Grado-día diario, fórmula literal de Eurostat (metadatos `nrg_chdd_esms`):
+
+    si la temperatura media diaria es <= 15°C, el grado-día es 18°C menos esa
+    temperatura; si no, 0. Un día sin temperatura (NaN) da NaN, no 0 — sin
+    dato no es lo mismo que sin necesidad de calefacción.
+    """
+    grados = (18.0 - temperatura_media).where(temperatura_media <= 15.0, 0.0)
+    return grados.where(temperatura_media.notna())
+
+
+def _temporada_calefaccion(fecha) -> int:
+    """Año de inicio de la temporada (1-oct de ese año a 30-sep del siguiente)."""
+    return fecha.year if fecha.month >= 10 else fecha.year - 1
+
+
+def _dia_desde_1_octubre(fecha) -> int:
+    """Días transcurridos desde el 1 de octubre de la temporada de `fecha`."""
+    inicio = pd.Timestamp(year=_temporada_calefaccion(fecha), month=10, day=1)
+    return (fecha - inicio).days
+
+
+def transform_hdd(series_ciudades: list) -> pd.DataFrame:
+    """HDD diario medio de un país (media de sus 1-3 ciudades) -> acumulado por temporada.
+
+    Args:
+        series_ciudades: lista de `pd.Series` de temperatura media diaria (una
+            por ciudad del país), indexadas por fecha. Salen de
+            `open_meteo_client.fetch_daily_temperature(...)['temperatura']`.
+
+    Returns:
+        DataFrame indexado por fecha, columnas: `temporada` (año de inicio),
+        `dia_temporada` (días desde el 1-oct de esa temporada) y
+        `hdd_acumulado` (acumulado de grados-día dentro de la temporada — se
+        reinicia en cada 1 de octubre, un día 30-sep no suma a la temporada
+        que empieza al día siguiente).
+
+    Raises:
+        ValueError: si `series_ciudades` está vacía, o si hay días sin dato
+            (alguna ciudad con NaN) que no sean los últimos de la serie — un
+            hueco así es un fallo de la fuente, no una asimetría de fechas
+            normal. Los huecos al final (datos aún no publicados) se recortan
+            en silencio, no son un error.
+    """
+    hdd_por_ciudad = [hdd_diario(serie) for serie in series_ciudades]
+    # skipna=False a propósito: si falta el dato de una sola ciudad ese día,
+    # la media del país para ese día no es fiable — mejor NaN que una media
+    # calculada sobre menos ciudades de las pactadas para el país.
+    hdd_medio = pd.concat(hdd_por_ciudad, axis=1).mean(axis=1, skipna=False).sort_index()
+
+    ultimo_valido = hdd_medio.last_valid_index()
+    if ultimo_valido is None:
+        raise ValueError("Ninguna de las ciudades tiene datos: la serie está vacía.")
+    hdd_medio = hdd_medio.loc[:ultimo_valido]  # recorta los huecos finales, sin avisar
+
+    huecos = hdd_medio[hdd_medio.isna()]
+    if not huecos.empty:
+        fechas = ", ".join(f.strftime("%Y-%m-%d") for f in huecos.index)
+        raise ValueError(f"Huecos de datos en medio de la serie (no al final): {fechas}")
+
+    df = hdd_medio.to_frame("hdd")
+    df["temporada"] = [_temporada_calefaccion(f) for f in df.index]
+    df["dia_temporada"] = [_dia_desde_1_octubre(f) for f in df.index]
+    df["hdd_acumulado"] = df.groupby("temporada")["hdd"].cumsum()
+    return df

@@ -264,3 +264,39 @@ def plot_lng_utilization(
             )
 
     return fig
+
+
+def plot_hdd_pais(df: pd.DataFrame, pais_nombre: str) -> "plotly.graph_objects.Figure":
+    """Grados-día de calefacción acumulados por temporada, una línea por invierno.
+
+    Mismo patrón que el gráfico de llenado de gas (`panel_reservas_eu_gas`):
+    una línea por temporada coloreada por temporada, en vez de una banda
+    mínimo-máximo. El eje X normaliza por "días desde el 1 de octubre" —
+    equivalente a la `fecha_normalizada` del llenado, pero anclado al inicio
+    de la temporada de calefacción en vez de al año calendario.
+
+    Args:
+        df: DataFrame indexado por fecha, salida de `data.transform.transform_hdd`
+            (columnas `temporada`, `dia_temporada`, `hdd_acumulado`).
+        pais_nombre: nombre legible del país para el título.
+
+    Returns:
+        plotly.graph_objects.Figure
+    """
+    import plotly.express as px
+
+    fig = px.line(
+        df,
+        x="dia_temporada",
+        y="hdd_acumulado",
+        color=df["temporada"].astype(str),
+        labels={
+            "hdd_acumulado": "Grados-día acumulados",
+            "dia_temporada": "Días desde el 1 de octubre",
+            "color": "Temporada",
+        },
+        render_mode="svg",
+        title=f"Grados-día de calefacción — {pais_nombre}",
+    )
+    fig.update_layout(hovermode="x unified", margin=dict(l=40, r=40, t=60, b=40))
+    return fig

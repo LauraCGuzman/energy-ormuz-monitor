@@ -33,17 +33,20 @@ from data.eia_client import (
 )
 from data.gie_client import get_client, fetch_gas_storage, fetch_lng
 from data.portwatch_client import fetch_chokepoint_flows
+from data.open_meteo_client import fetch_daily_temperature
 from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
-    transform_reservas_emergencia, transform_origen_gas,
+    transform_reservas_emergencia, transform_origen_gas, transform_hdd,
     NOMBRES_PAISES_UE, NOMBRES_GEO, NOMBRES_GEO_AGSI,
     NOMBRES_CHOKEPOINTS, CHOKEPOINT_DEFECTO, etiqueta_chokepoint,
-    calcular_autonomias_spr, EstadoSPR
+    calcular_autonomias_spr, EstadoSPR, CIUDADES_HDD
 )
 from data.eurostat_client import (
     fetch_reservas_emergencia, fetch_origen_gas,
 )
-from utils.charts import plot_reservas_emergencia, plot_origen_gas, plot_lng_utilization
+from utils.charts import (
+    plot_reservas_emergencia, plot_origen_gas, plot_lng_utilization, plot_hdd_pais,
+)
 
 
 # Configuración de la página (debe ser la primera llamada a st)
@@ -321,6 +324,33 @@ def panel_reservas_eu_gas() -> None:
         "artefacto de la fuente (más frecuente en Portugal, Bélgica, Rumanía, Suecia y Polonia), no "
         "un error de cálculo de este panel."
     )
+
+    # 6. Grados-día de calefacción (HDD): mismo país seleccionado arriba.
+    # 'EU' no tiene gráfico (índice por país, no agregable) y los países que
+    # no pasaron la validación de la Fase 1 tampoco (ver CIUDADES_HDD).
+    if geo == 'EU':
+        st.info(
+            "El índice de grados-día se calcula por país. Selecciona un país para verlo junto a sus reservas."
+        )
+    elif geo not in CIUDADES_HDD:
+        st.info(
+            "Este país no tiene índice de grados-día: con las ciudades disponibles, el índice no reproduce "
+            "de forma estable la serie oficial de Eurostat."
+        )
+    else:
+        series_temperatura = [
+            fetch_daily_temperature(lat, lon)["temperatura"]
+            for _, lat, lon in CIUDADES_HDD[geo]
+        ]
+        df_hdd = transform_hdd(series_temperatura)
+        st.plotly_chart(plot_hdd_pais(df_hdd, geo_nombre), width='stretch')
+        st.caption(
+            "Grados-día de calefacción acumulados desde el 1 de octubre. Índice propio: fórmula de "
+            "Eurostat aplicada a la temperatura media diaria de Open-Meteo en una a tres ciudades del "
+            "país. Sirve para comparar este invierno con los anteriores, no para replicar las cifras "
+            "oficiales de Eurostat. Más grados-día significa más frío y más necesidad de calefacción. "
+            "Los datos llegan con unos cinco días de retraso."
+        )
 
 def panel_llegada_gas()  -> None:
     """Panel autocontenido para las reservas de gas subterráneo en España."""
