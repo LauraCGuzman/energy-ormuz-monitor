@@ -34,9 +34,12 @@ from data.eia_client import (
 from data.gie_client import get_client, fetch_gas_storage, fetch_lng
 from data.portwatch_client import fetch_chokepoint_flows
 from data.open_meteo_client import fetch_daily_temperature
+from data.entsog_client import fetch_punto, MAPA_PUNTOS_ENTRADA, PUNTOS_DOBLE_SENTIDO
 from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
     transform_reservas_emergencia, transform_origen_gas, transform_hdd,
+    transform_entrada_gas_ue, contar_dias_sospechosos, media_7d_atras,
+    vaciar_dia_si_falta_algun_origen,
     NOMBRES_PAISES_UE, NOMBRES_GEO, NOMBRES_GEO_AGSI,
     NOMBRES_CHOKEPOINTS, CHOKEPOINT_DEFECTO, etiqueta_chokepoint,
     calcular_autonomias_spr, EstadoSPR, CIUDADES_HDD
@@ -46,7 +49,7 @@ from data.eurostat_client import (
 )
 from utils.charts import (
     plot_reservas_emergencia, plot_origen_gas, plot_lng_utilization, plot_hdd_pais,
-    resaltar_serie_mas_reciente,
+    plot_entrada_gas_ue, resaltar_serie_mas_reciente,
 )
 
 
@@ -387,6 +390,71 @@ def panel_llegada_gas()  -> None:
     )
 
 
+def panel_entrada_gas_ue() -> None:
+    """Panel: entrada de gas a la UE por origen — gasoductos (ENTSOG) + GNL (ALSI+).
+
+    Agregado UE-27 únicamente (pliego «panel-gasoductos»): por país haría
+    falta descontar los flujos entre países de la UE, fuera del alcance de
+    esta versión.
+    """
+    st.subheader("Entrada de gas a la UE por origen — gasoductos (ENTSOG) y GNL (GIE ALSI)")
+    st.caption(
+        "Gas que entra en la UE cada día, en GWh/día, media de los últimos 7 días. Gasoductos desde "
+        "fuera de la UE (ENTSOG) agrupados por el país de donde sale el gas, no por el país fronterizo: "
+        "el gas que llega por Túnez o Marruecos cuenta como argelino. El gas que sale de la UE y vuelve "
+        "a entrar no se cuenta dos veces. El GNL es el gas regasificado en las terminales (ALSI+). Un día "
+        "con flujo cero y sin gas nominado es una parada real y cuenta como cero."
+    )
+
+    # 1. Extracción: flujo físico y nominación de cada punto del mapa (Fase 0).
+    #    Flujo de salida solo en los puntos de doble sentido (regla de
+    #    sentido contrario, PARADA 3).
+    datos_flujo, datos_nominacion, datos_flujo_salida = {}, {}, {}
+    for punto in MAPA_PUNTOS_ENTRADA:
+        clave = (punto.point_key, punto.operator_key)
+        if clave in datos_flujo:
+            continue  # varios orígenes no comparten punto, pero por si acaso
+        datos_flujo[clave] = fetch_punto(punto.point_key, punto.operator_key, "Physical Flow")
+        datos_nominacion[clave] = fetch_punto(punto.point_key, punto.operator_key, "Nomination")
+        if punto.point_key in PUNTOS_DOBLE_SENTIDO:
+            datos_flujo_salida[clave] = fetch_punto(
+                punto.point_key, punto.operator_key, "Physical Flow", direction="exit"
+            )
+
+    # 2. Transformación: calidad (+ sentido contrario) + GWh/d + suma por
+    #    origen + media 7 días.
+    df_gasoductos = transform_entrada_gas_ue(
+        datos_flujo, datos_nominacion, MAPA_PUNTOS_ENTRADA, datos_flujo_salida
+    )
+
+    # 3. Capa de GNL: sendOut de ALSI+ agregado UE, misma media de 7 días.
+    api_key = st.secrets["GIE_API_KEY"]
+    client_gie = get_client(api_key=api_key)
+    df_lng_bruto = fetch_lng(client_gie, "EU")
+    df_lng = transform_gas(df_lng_bruto, pais="EU")
+    gnl_7d = media_7d_atras(df_lng["sendOut"].astype(float))
+
+    df_combinado = df_gasoductos.copy()
+    df_combinado["GNL"] = gnl_7d.reindex(df_combinado.index)
+    df_combinado = df_combinado.dropna(how="all")
+    # Un día sin dato de cualquier origen queda vacío para todos: si no, el
+    # área apilada de Plotly rellena con 0 el que falta y sigue apilando el
+    # resto (stackgaps='infer zero'), y el hueco no se ve como hueco.
+    df_combinado = vaciar_dia_si_falta_algun_origen(df_combinado)
+
+    # 4. Gráfico
+    st.plotly_chart(plot_entrada_gas_ue(df_combinado), width='stretch')
+
+    # 5. Aviso de días sospechosos, solo si los hay en la ventana mostrada.
+    n_sospechosos = contar_dias_sospechosos(
+        datos_flujo, datos_nominacion, MAPA_PUNTOS_ENTRADA, datos_flujo_salida
+    )
+    if n_sospechosos > 0:
+        st.info(
+            f"Hay {n_sospechosos} días con flujo cero pese a tener gas nominado. Se muestran como hueco, no como cero, "
+            "porque con los datos publicados no se puede distinguir una parada de un fallo de reporte."
+        )
+
 
 @st.fragment
 def panel_portwatch() -> None:
@@ -694,6 +762,9 @@ def main() -> None:
     # --- PASO 4: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
     panel_llegada_gas()
 
+    # --- PASO 4b: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
+    panel_entrada_gas_ue()
+
     # --- PASO 5: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
     panel_reservas_emergencia()
 
@@ -713,6 +784,7 @@ def main() -> None:
         | EIA | Brent spot | Diaria |
         | EIA | Reservas de crudo (SPR y comerciales) y productos | Semanal |
         | GIE AGSI+ | Reservas de gas subterráneo | Diaria |
+        | ENTSOG | Entrada de gas por gasoducto (flujo físico y nominación) | Diaria |
         | Eurostat | Reservas de emergencia y origen del gas | Mensual |
 
         **Desfases de publicación**

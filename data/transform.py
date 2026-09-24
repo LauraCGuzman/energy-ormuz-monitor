@@ -467,6 +467,291 @@ CIUDADES_HDD = {
 }
 
 
+# ── Entrada de gas a la UE por origen (gasoductos ENTSOG + GNL) ──────────────
+#
+# Pliego «panel-gasoductos». Combina flujo físico y nominación punto a punto
+# para distinguir una parada real de un hueco de reporte, suma por origen
+# físico (no por país fronterizo) y suaviza con una media de 7 días.
+
+
+def _flujo_sospechoso(
+    flujo_fisico: pd.Series,
+    nominacion: pd.Series,
+    flujo_salida: "pd.Series | None" = None,
+) -> pd.Series:
+    """Flujo físico 0 pero con gas nominado: sospechoso, no se puede tomar por
+    una parada real con los datos publicados — SALVO que ese mismo día haya
+    flujo físico > 0 en sentido de SALIDA en el mismo punto (regla de
+    sentido contrario, PARADA 3): ahí el 0 de entrada es real, el gas fluyó
+    al revés ese día, no es un hueco de reporte.
+
+    Args:
+        flujo_fisico: kWh/d de entrada, indexado por fecha.
+        nominacion: kWh/d de entrada, mismo índice.
+        flujo_salida: kWh/d de salida del mismo punto, mismo índice — o
+            `None` si el punto no es de doble sentido (no se pidió). Un día
+            sin dato de salida (NaN) no rescata: sigue sospechoso.
+    """
+    sospechoso = (flujo_fisico == 0) & (nominacion > 0)
+    if flujo_salida is None:
+        return sospechoso
+    sentido_contrario = (flujo_salida > 0).reindex(sospechoso.index, fill_value=False)
+    return sospechoso & ~sentido_contrario
+
+
+def regla_calidad_entsog(
+    flujo_fisico: pd.Series,
+    nominacion: pd.Series,
+    flujo_salida: "pd.Series | None" = None,
+) -> pd.Series:
+    """Regla de calidad de un punto ENTSOG, función pura (pliego, Fase 2.3 +
+    regla de sentido contrario, PARADA 3):
+
+    | Flujo físico (entrada) | Nominación | Flujo salida | Resultado |
+    |---|---|---|---|
+    | 0             | 0          | —          | 0 (parada real)             |
+    | 0             | > 0        | > 0        | 0 (real: fluyó al revés)    |
+    | 0             | > 0        | 0 o NaN    | NaN (vacío, sospechoso)     |
+    | NaN           | cualquiera | —          | NaN (vacío)                 |
+    | > 0           | cualquiera | —          | el flujo                    |
+
+    Args:
+        flujo_fisico: kWh/d de entrada, indexado por fecha. Puede tener NaN
+            (sin dato publicado ese día).
+        nominacion: kWh/d de entrada, mismo índice que `flujo_fisico`.
+        flujo_salida: kWh/d de salida del mismo punto, mismo índice, o
+            `None` si el punto no es de doble sentido (`PUNTOS_DOBLE_SENTIDO`).
+
+    Returns:
+        pd.Series con el mismo índice: el flujo físico de entrada tal cual
+        cuando es fiable (0 real o positivo), o NaN cuando es 0 con gas
+        nominado y sin flujo contrario que lo explique, o cuando el propio
+        flujo físico de entrada falta.
+    """
+    resultado = flujo_fisico.copy()
+    resultado[_flujo_sospechoso(flujo_fisico, nominacion, flujo_salida)] = float("nan")
+    return resultado
+
+
+def kwh_dia_a_gwh_dia(serie_kwh: pd.Series) -> pd.Series:
+    """kWh/d -> GWh/d (1 GWh = 1.000.000 kWh). NaN se mantiene NaN."""
+    return serie_kwh / 1_000_000
+
+
+def sumar_por_origen(df_largo: pd.DataFrame) -> pd.DataFrame:
+    """Suma el valor ya filtrado por la regla de calidad, por origen y día.
+
+    Un origen-día queda NaN si CUALQUIERA de sus puntos ese día es NaN — no
+    se suma a medias con los puntos que sí tienen dato: un origen es tan
+    fiable como su punto más débil ese día (pliego, Fase 2.4).
+
+    Args:
+        df_largo: DataFrame con columnas 'fecha', 'origen', 'valor_gwh' — una
+            fila por punto y día, ya pasado por `regla_calidad_entsog` y
+            `kwh_dia_a_gwh_dia`. Debe tener una fila por cada combinación
+            punto-fecha del rango (con NaN explícito si falta), no huecos
+            implícitos: una fecha ausente para un punto no se distingue de
+            un punto que nunca perteneció a ese origen.
+
+    Returns:
+        DataFrame pivotado (fecha × origen). NaN donde algún punto de ese
+        origen-día faltó o fue sospechoso.
+    """
+    valores = df_largo.pivot_table(index="fecha", columns="origen", values="valor_gwh", aggfunc="sum")
+    todos_validos = df_largo.pivot_table(
+        index="fecha", columns="origen", values="valor_gwh",
+        aggfunc=lambda serie: bool(serie.notna().all()),
+    )
+    return valores.where(todos_validos.astype(bool))
+
+
+def media_7d_atras(serie_o_df: "pd.Series | pd.DataFrame"):
+    """Media móvil de 7 días hacia atrás: el día actual y los 6 anteriores,
+    nunca días futuros. Exige al menos 5 de los 7 días con dato — con menos
+    de 5, el resultado de ese día es NaN. Con 5, 6 o 7 días disponibles, la
+    media se calcula sobre los que haya (no imputa los que faltan).
+    """
+    return serie_o_df.rolling(window=7, min_periods=5).mean()
+
+
+def vaciar_dia_si_falta_algun_origen(df: pd.DataFrame) -> pd.DataFrame:
+    """Si a un día le falta el dato de CUALQUIER origen (columna), ese día
+    queda vacío para TODOS los orígenes — no solo el que falta.
+
+    Motivo (comprobado con `px.area`, ver informe de la PARADA 3): cuando
+    solo algunas columnas tienen NaN ese día, Plotly (`stackgaps`, por
+    defecto `'infer zero'`) inserta un 0 en las que faltan y sigue apilando
+    las demás — el hueco no se ve como hueco, se ve como si esa columna
+    hubiera valido 0. Solo cuando TODAS las columnas faltan a la vez no hay
+    ninguna traza con dato del que "inferir cero", y con `connectgaps` en su
+    valor por defecto (`False`) Plotly deja un hueco real en el área.
+
+    Args:
+        df: DataFrame indexado por fecha, una columna por origen (incluida
+            la capa de GNL).
+
+    Returns:
+        Copia de `df` con la fila entera a NaN en cualquier fecha donde
+        faltara al menos una columna.
+    """
+    dia_completo = df.notna().all(axis=1)
+    return df.where(dia_completo, other=float("nan"))
+
+
+def _agrupar_por_punto_fisico(mapa_puntos: list) -> list:
+    """Agrupa las entradas del mapa por punto físico real.
+
+    Varios operadores pueden declarar el MISMO punto físico (ej. Emden
+    EPT1: GUD/OGE/GTS) — comparten `grupo_fisico` en el mapa. El resto de
+    puntos (`grupo_fisico=None`) se agrupa consigo mismo, por `point_key`.
+
+    Args:
+        mapa_puntos: lista de `entsog_client.PuntoEntrada`.
+
+    Returns:
+        Lista de (clave_de_grupo, [puntos_del_grupo]), en el orden de
+        primera aparición.
+    """
+    grupos: dict = {}
+    orden = []
+    for punto in mapa_puntos:
+        clave = punto.grupo_fisico if punto.grupo_fisico is not None else punto.point_key
+        if clave not in grupos:
+            grupos[clave] = []
+            orden.append(clave)
+        grupos[clave].append(punto)
+    return [(clave, grupos[clave]) for clave in orden]
+
+
+def _ensamblar_largo(
+    datos_flujo: dict,
+    datos_nominacion: dict,
+    mapa_puntos: list,
+    datos_flujo_salida: "dict | None" = None,
+) -> pd.DataFrame:
+    """Punto de partida compartido por `transform_entrada_gas_ue` y
+    `contar_dias_sospechosos`: agrupa el mapa por punto físico
+    (`_agrupar_por_punto_fisico`), reindexa cada operador del grupo al rango
+    de fechas común (unión de lo disponible), SUMA el flujo/nominación/flujo
+    de salida de todos los operadores del grupo y arma una fila por punto
+    físico y fecha con el valor ya filtrado por la regla de calidad (GWh/d,
+    aplicada al TOTAL del grupo, no a cada operador) y si esa fecha fue
+    sospechosa.
+
+    Args:
+        datos_flujo: dict {(point_key, operator_key): pd.Series} de flujo
+            físico de entrada en kWh/d, salida de `entsog_client.fetch_punto`.
+        datos_nominacion: mismo formato, indicador 'Nomination'.
+        mapa_puntos: lista de `entsog_client.PuntoEntrada` (o un subconjunto,
+            para tests) — solo se procesan los puntos presentes en
+            `datos_flujo`.
+        datos_flujo_salida: mismo formato que `datos_flujo`, flujo físico de
+            SALIDA — solo para los puntos de doble sentido
+            (`entsog_client.PUNTOS_DOBLE_SENTIDO`). `None` u omitido para un
+            punto: la regla de calidad se aplica sin sentido contrario (como
+            antes de la PARADA 3).
+
+    Returns:
+        DataFrame largo con columnas 'fecha', 'origen', 'valor_gwh',
+        'sospechoso'. Vacío (sin filas) si `datos_flujo` está vacío.
+    """
+    columnas = ["fecha", "origen", "valor_gwh", "sospechoso"]
+    if not datos_flujo:
+        return pd.DataFrame(columns=columnas)
+    if datos_flujo_salida is None:
+        datos_flujo_salida = {}
+
+    rango_completo = sorted(set().union(*(serie.index for serie in datos_flujo.values())))
+
+    filas = []
+    for _grupo_key, puntos_grupo in _agrupar_por_punto_fisico(mapa_puntos):
+        claves = [
+            (p.point_key, p.operator_key) for p in puntos_grupo
+            if (p.point_key, p.operator_key) in datos_flujo
+        ]
+        if not claves:
+            continue
+        origen = puntos_grupo[0].origen
+
+        # Suma PRIMERO el flujo, la nominación y el flujo de salida de todos
+        # los operadores del punto físico (la suma con '+' propaga NaN si a
+        # alguno le falta el dato ese día — un hueco real de un operador
+        # sigue siendo un hueco del punto). La regla de calidad se aplica
+        # DESPUÉS, al total — no a cada operador por separado (PARADA 3: un
+        # operador en 0 con otro compensando al alza es una redistribución
+        # real dentro del punto, no una parada).
+        flujo_total = sum(datos_flujo[c].reindex(rango_completo) for c in claves)
+        nominacion_total = sum(datos_nominacion[c].reindex(rango_completo) for c in claves)
+
+        claves_salida = [c for c in claves if c in datos_flujo_salida]
+        flujo_salida_total = None
+        if claves_salida:
+            flujo_salida_total = sum(datos_flujo_salida[c].reindex(rango_completo) for c in claves_salida)
+
+        valido_kwh = regla_calidad_entsog(flujo_total, nominacion_total, flujo_salida_total)
+        filas.append(pd.DataFrame({
+            "fecha": rango_completo,
+            "origen": origen,
+            "valor_gwh": kwh_dia_a_gwh_dia(valido_kwh).values,
+            "sospechoso": _flujo_sospechoso(flujo_total, nominacion_total, flujo_salida_total).values,
+        }))
+
+    if not filas:
+        return pd.DataFrame(columns=columnas)
+    return pd.concat(filas, ignore_index=True)
+
+
+def transform_entrada_gas_ue(
+    datos_flujo: dict,
+    datos_nominacion: dict,
+    mapa_puntos: list,
+    datos_flujo_salida: "dict | None" = None,
+) -> pd.DataFrame:
+    """Ensambla el panel de entrada de gas a la UE por origen.
+
+    Aplica la regla de calidad punto a punto (con la regla de sentido
+    contrario donde haya flujo de salida), convierte a GWh/d, suma por
+    origen (un origen-día con cualquier punto vacío queda vacío) y suaviza
+    con la media móvil de 7 días hacia atrás.
+
+    Args:
+        datos_flujo: dict {(point_key, operator_key): pd.Series} de flujo
+            físico de entrada en kWh/d.
+        datos_nominacion: mismo formato, indicador 'Nomination'.
+        mapa_puntos: lista de `entsog_client.PuntoEntrada`.
+        datos_flujo_salida: mismo formato, flujo físico de SALIDA — solo
+            para los puntos de doble sentido. Opcional.
+
+    Returns:
+        DataFrame indexado por fecha, una columna por origen, GWh/d, ya
+        suavizado (NaN mientras no haya al menos 5 de los 7 días de
+        histórico, o si algún punto del origen faltó/fue sospechoso ese
+        día). Vacío si no hay datos.
+    """
+    df_largo = _ensamblar_largo(datos_flujo, datos_nominacion, mapa_puntos, datos_flujo_salida)
+    if df_largo.empty:
+        return pd.DataFrame()
+    por_origen = sumar_por_origen(df_largo[["fecha", "origen", "valor_gwh"]])
+    return media_7d_atras(por_origen)
+
+
+def contar_dias_sospechosos(
+    datos_flujo: dict,
+    datos_nominacion: dict,
+    mapa_puntos: list,
+    datos_flujo_salida: "dict | None" = None,
+) -> int:
+    """Nº de días de calendario DISTINTOS con al menos un origen sospechoso
+    ese día — no combinaciones origen-día: el texto del aviso (pliego, Fase
+    3) dice «días», así que un día con dos orígenes sospechosos a la vez
+    cuenta una vez, no dos.
+    """
+    df_largo = _ensamblar_largo(datos_flujo, datos_nominacion, mapa_puntos, datos_flujo_salida)
+    if df_largo.empty:
+        return 0
+    return int(df_largo.groupby("fecha")["sospechoso"].any().sum())
+
+
 def hdd_diario(temperatura_media: pd.Series) -> pd.Series:
     """Grado-día diario, fórmula literal de Eurostat (metadatos `nrg_chdd_esms`):
 

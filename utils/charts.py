@@ -296,6 +296,34 @@ def plot_lng_utilization(
     return fig
 
 
+def plot_entrada_gas_ue(df_combinado: pd.DataFrame) -> "plotly.graph_objects.Figure":
+    """Área apilada de entrada de gas a la UE por origen (gasoductos ENTSOG + GNL ALSI+).
+
+    Args:
+        df_combinado: DataFrame indexado por fecha, una columna por origen
+            de gasoducto más una columna 'GNL' (sendOut ALSI+ agregado UE),
+            todo en GWh/d y ya suavizado con la media de 7 días (salida de
+            `transform_entrada_gas_ue` + `media_7d_atras` sobre el sendOut).
+
+    Returns:
+        plotly.graph_objects.Figure
+    """
+    import plotly.express as px
+
+    fig = px.area(
+        df_combinado, x=df_combinado.index, y=df_combinado.columns,
+        title="Entrada de gas a la UE por origen — gasoductos y GNL",
+        labels={"value": "GWh/día (media 7 días)", "index": "Fecha", "variable": "Origen"},
+    )
+    fig.add_vline(x="2026-02-28", line_dash="dot", line_color="black")
+    fig.add_annotation(
+        x="2026-02-28", y=1, yref="paper",
+        text="Inicio Conflicto (28-Feb)", showarrow=True, arrowhead=1, ax=60, ay=-20
+    )
+    fig.update_layout(hovermode="x unified", margin=dict(l=40, r=40, t=60, b=40))
+    return fig
+
+
 def plot_hdd_pais(df: pd.DataFrame, pais_nombre: str) -> "plotly.graph_objects.Figure":
     """Grados-día de calefacción acumulados por temporada, una línea por invierno.
 
