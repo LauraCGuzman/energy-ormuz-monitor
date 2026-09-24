@@ -40,6 +40,7 @@ entrada a la UE desde un país de fuera de la UE, con su origen físico real
 from __future__ import annotations
 
 from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import requests
@@ -47,6 +48,7 @@ import streamlit as st
 
 
 ENTSOG_OPERATIONALDATA_URL = "https://transparency.entsog.eu/api/v1/operationaldata"
+ENTSOG_LIMIT_POR_PETICION = 2000
 
 PuntoEntrada = namedtuple(
     "PuntoEntrada", ["point_key", "operator_key", "etiqueta", "origen", "grupo_fisico"],
@@ -61,7 +63,47 @@ PuntoEntrada = namedtuple(
 # consigo mismo, por `point_key`.
 
 
-@st.cache_data(ttl=21600)
+def _requiere_cobertura_completa(indicator: str, direction: str) -> bool:
+    """Solo el flujo físico de ENTRADA exige respuesta completa (pliego
+    «robustez», Fase 1, decisión de Laura). Nominación y flujo de salida
+    pueden llegar vacíos o con la serie cortada sin que sea un corte de
+    verdad — ver `PUNTOS_SIN_DATOS_PUBLICADOS` y el caso de VIP Bereg más
+    abajo, en `_cobertura_incompleta`.
+    """
+    return indicator == "Physical Flow" and direction == "entry"
+
+
+def _es_respuesta_truncada_por_limite(serie: pd.Series, limit: int = ENTSOG_LIMIT_POR_PETICION) -> bool:
+    """Una respuesta con EXACTAMENTE `limit` filas puede estar cortada por la
+    paginación de ENTSOG (que no se implementa aquí, ver módulo) — no hay
+    forma de distinguir "justo el límite" de "más allá del límite, cortado"
+    sin pedir una página más, así que se trata como sospechosa.
+    """
+    return len(serie) == limit
+
+
+def _cobertura_incompleta(serie: pd.Series, start: str, end: str) -> bool:
+    """Compara el primer y el último día recibidos con el rango pedido
+    (pliego «robustez», Fase 1.2).
+
+    Una respuesta vacía (0 filas, incluido un 404) cuenta como incompleta
+    aquí — pero esta función solo se llama para flujo físico de entrada
+    (`_requiere_cobertura_completa`); para nominación y flujo de salida un
+    0 sigue significando "sin dato publicado", no un corte.
+
+    Returns:
+        True si no hay filas, o si el primer día llega más de 3 días tarde,
+        o si el último día llega más de 3 días antes del fin del rango.
+    """
+    if len(serie) == 0:
+        return True
+    inicio_pedido = pd.Timestamp(start)
+    fin_pedido = pd.Timestamp(end)
+    llega_tarde = serie.index.min() > inicio_pedido + pd.Timedelta(days=3)
+    acaba_pronto = serie.index.max() < fin_pedido - pd.Timedelta(days=3)
+    return bool(llega_tarde or acaba_pronto)
+
+
 def fetch_punto(
     point_key: str,
     operator_key: str,
@@ -71,6 +113,26 @@ def fetch_punto(
     end: str | None = None,
 ) -> pd.Series:
     """Descarga un indicador diario de un punto de entrada a la UE.
+
+    Sin `@st.cache_data` propia (pliego «robustez», Fase 2): se llama desde
+    hilos de `fetch_todos_los_puntos`, que es quien cachea la descarga
+    completa del panel.
+
+    Para el flujo físico de ENTRADA exige respuesta completa
+    (`_requiere_cobertura_completa`): si la respuesta trae exactamente
+    `ENTSOG_LIMIT_POR_PETICION` filas, falla al momento (posible corte de
+    paginación, no se soluciona reintentando). Si está vacía o el primer/
+    último día no cuadra con lo pedido (más de 3 días de margen), reintenta
+    una vez; si la segunda tampoco cuadra, lanza `ValueError`. Al no tener
+    caché propia, un error aquí no se guarda — la siguiente carga del panel
+    vuelve a intentarlo desde cero.
+
+    Nominación y flujo de salida NO pasan por esta comprobación: una
+    respuesta vacía o con la serie cortada sigue siendo "sin dato
+    publicado", como antes de esta Fase — hay al menos un caso real donde
+    la nominación deja de publicarse sin que sea un fallo (VIP Bereg,
+    `ITP-10006`, dejó de publicar nominaciones el 28-2-2026; aplicarle esta
+    regla tumbaría el panel en cada carga por algo que no es transitorio).
 
     Args:
         point_key: identificador ENTSOG del punto (ej. 'ITP-00106').
@@ -86,36 +148,73 @@ def fetch_punto(
 
     Returns:
         pd.Series de kWh/d (float), indexada por fecha (datetime, ordenada,
-        nombre 'fecha'). Vacía si ENTSOG no tiene ninguna fila publicada para
-        esta combinación punto/operador/indicador/dirección en el rango
-        pedido (404 "No result found") — no es un fallo de red, es ausencia
-        de datos publicados (comprobado en Fase 0 y Fase 2 para varios
-        puntos, ver módulo).
+        nombre 'fecha'). Vacía si ENTSOG no tiene ninguna fila publicada
+        para esta combinación (404 "No result found") Y no se exige
+        cobertura completa (nominación o flujo de salida) — no es un fallo
+        de red, es ausencia de datos publicados.
+
+    Raises:
+        ValueError: para flujo físico de entrada, si la respuesta trae
+            exactamente el límite de filas, o si tras un reintento la
+            respuesta sigue vacía o sin cubrir el rango pedido con un
+            margen de 3 días.
     """
     if end is None:
         end = pd.Timestamp.today().strftime("%Y-%m-%d")
 
-    params = {
-        "pointKey": point_key,
-        "operatorKey": operator_key,
-        "directionKey": direction,
-        "indicator": indicator,
-        "periodType": "day",
-        "from": start,
-        "to": end,
-        "limit": 2000,
-    }
-    response = requests.get(ENTSOG_OPERATIONALDATA_URL, params=params, timeout=60)
+    def _descargar() -> pd.Series:
+        params = {
+            "pointKey": point_key,
+            "operatorKey": operator_key,
+            "directionKey": direction,
+            "indicator": indicator,
+            "periodType": "day",
+            "from": start,
+            "to": end,
+            "limit": ENTSOG_LIMIT_POR_PETICION,
+        }
+        response = requests.get(ENTSOG_OPERATIONALDATA_URL, params=params, timeout=60)
 
-    if response.status_code == 404:
-        return pd.Series(dtype="float64", index=pd.DatetimeIndex([], name="fecha"))
+        if response.status_code == 404:
+            return pd.Series(dtype="float64", index=pd.DatetimeIndex([], name="fecha"))
 
-    response.raise_for_status()
-    filas = response.json()["operationaldata"]
-    df = pd.DataFrame(filas)
-    df["fecha"] = pd.to_datetime(df["periodFrom"].str[:10])
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    serie = df.set_index("fecha")["value"].sort_index()
+        response.raise_for_status()
+        filas = response.json()["operationaldata"]
+        df = pd.DataFrame(filas)
+        df["fecha"] = pd.to_datetime(df["periodFrom"].str[:10])
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        return df.set_index("fecha")["value"].sort_index()
+
+    if not _requiere_cobertura_completa(indicator, direction):
+        return _descargar()
+
+    serie = _descargar()
+    if _es_respuesta_truncada_por_limite(serie):
+        raise ValueError(
+            f"ENTSOG devolvió exactamente el límite de {ENTSOG_LIMIT_POR_PETICION} filas para "
+            f"{point_key}/{operator_key}, indicador={indicator}, sentido={direction} — puede estar "
+            f"cortada por paginación (no implementada)."
+        )
+
+    if not _cobertura_incompleta(serie, start, end):
+        return serie
+
+    # Reintento único (pliego, Fase 1.2).
+    serie = _descargar()
+    if _es_respuesta_truncada_por_limite(serie):
+        raise ValueError(
+            f"ENTSOG devolvió exactamente el límite de {ENTSOG_LIMIT_POR_PETICION} filas para "
+            f"{point_key}/{operator_key}, indicador={indicator}, sentido={direction} tras reintentar "
+            f"— puede estar cortada por paginación (no implementada)."
+        )
+    if _cobertura_incompleta(serie, start, end):
+        primera = serie.index.min().strftime("%Y-%m-%d") if len(serie) else None
+        ultima = serie.index.max().strftime("%Y-%m-%d") if len(serie) else None
+        raise ValueError(
+            f"Respuesta incompleta de ENTSOG tras reintentar: punto={point_key}/{operator_key}, "
+            f"indicador={indicator}, sentido={direction}, pedido {start}..{end}, "
+            f"recibido {primera}..{ultima} ({len(serie)} filas)."
+        )
     return serie
 
 
@@ -233,6 +332,63 @@ PUNTOS_DOBLE_SENTIDO = {
     "ITP-00117",  # Uzhhorod - Velké Kapušany
     "ITP-10008",  # GCP GAZ-SYSTEM/UA TSO
 }
+
+
+@st.cache_data(ttl=21600)
+def fetch_todos_los_puntos(
+    start: str = "2025-01-01",
+    end: str | None = None,
+) -> tuple[dict, dict, dict]:
+    """Descarga en paralelo los tres indicadores de todos los puntos del mapa
+    (pliego «robustez», Fase 2).
+
+    La caché envuelve la descarga COMPLETA del panel, no cada petición
+    individual — así una respuesta incompleta de un punto no deja el resto
+    cacheado a medias con un hueco: si falla una, falla la función entera
+    y no se guarda nada en caché (ningún `st.*` dentro de los hilos:
+    `fetch_punto` ya no tiene su propia `@st.cache_data`).
+
+    Máximo 6 hilos (`ThreadPoolExecutor`) para las hasta 71 peticiones
+    (26 puntos × flujo físico + nominación, más los de doble sentido ×
+    flujo de salida).
+
+    Args:
+        start: fecha de inicio (YYYY-MM-DD). Por defecto 1-1-2025 (pliego).
+        end: fecha de fin (None = hoy).
+
+    Returns:
+        Tupla (datos_flujo, datos_nominacion, datos_flujo_salida), cada uno
+        un dict {(point_key, operator_key): pd.Series} — mismo formato que
+        esperan `data.transform.transform_entrada_gas_ue` y
+        `data.transform.contar_dias_sospechosos`.
+
+    Raises:
+        Lo que lance cualquiera de las `fetch_punto` en paralelo (ver esa
+        función) — se propaga tal cual, sin capturar.
+    """
+    tareas = []
+    claves_vistas = set()
+    for punto in MAPA_PUNTOS_ENTRADA:
+        clave = (punto.point_key, punto.operator_key)
+        if clave in claves_vistas:
+            continue
+        claves_vistas.add(clave)
+        tareas.append(("flujo", clave, punto.point_key, punto.operator_key, "Physical Flow", "entry"))
+        tareas.append(("nominacion", clave, punto.point_key, punto.operator_key, "Nomination", "entry"))
+        if punto.point_key in PUNTOS_DOBLE_SENTIDO:
+            tareas.append(("salida", clave, punto.point_key, punto.operator_key, "Physical Flow", "exit"))
+
+    resultados: dict = {"flujo": {}, "nominacion": {}, "salida": {}}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futuros = {
+            executor.submit(fetch_punto, pk, opk, indicador, direction=direccion, start=start, end=end): (tipo, clave)
+            for tipo, clave, pk, opk, indicador, direccion in tareas
+        }
+        for futuro in as_completed(futuros):
+            tipo, clave = futuros[futuro]
+            resultados[tipo][clave] = futuro.result()  # propaga la excepción si la hubo
+
+    return resultados["flujo"], resultados["nominacion"], resultados["salida"]
 
 
 # ── Reentradas y otras exclusiones estructurales (documentado, no usado en

@@ -24,7 +24,8 @@ from data.transform import (
 )
 from data.entsog_client import (
     MAPA_PUNTOS_ENTRADA, PUNTOS_REENTRADA_EXCLUIDOS, PUNTOS_SIN_DATOS_PUBLICADOS,
-    PuntoEntrada,
+    PuntoEntrada, _requiere_cobertura_completa, _es_respuesta_truncada_por_limite,
+    _cobertura_incompleta,
 )
 
 
@@ -280,6 +281,69 @@ class TestMapaPuntosEntrada(unittest.TestCase):
             self.assertTrue(punto.point_key)
             self.assertTrue(punto.motivo)
             self.assertTrue(punto.fecha_ultimo_dato)
+
+
+class TestRequiereCoberturaCompleta(unittest.TestCase):
+    def test_solo_flujo_fisico_de_entrada_la_exige(self):
+        self.assertTrue(_requiere_cobertura_completa("Physical Flow", "entry"))
+
+    def test_nominacion_no_la_exige_aunque_sea_entry(self):
+        self.assertFalse(_requiere_cobertura_completa("Nomination", "entry"))
+
+    def test_flujo_de_salida_no_la_exige(self):
+        self.assertFalse(_requiere_cobertura_completa("Physical Flow", "exit"))
+
+
+class TestEsRespuestaTruncadaPorLimite(unittest.TestCase):
+    def test_con_exactamente_el_limite_de_filas(self):
+        serie = pd.Series(range(2000), index=pd.date_range("2025-01-01", periods=2000))
+
+        self.assertTrue(_es_respuesta_truncada_por_limite(serie, limit=2000))
+
+    def test_con_menos_filas_que_el_limite_no_es_truncada(self):
+        serie = pd.Series(range(10), index=pd.date_range("2025-01-01", periods=10))
+
+        self.assertFalse(_es_respuesta_truncada_por_limite(serie, limit=2000))
+
+
+class TestCoberturaIncompleta(unittest.TestCase):
+    def test_respuesta_completa_pasa(self):
+        serie = pd.Series(
+            range(10), index=pd.date_range("2025-01-01", "2025-01-10")
+        )
+
+        self.assertFalse(_cobertura_incompleta(serie, "2025-01-01", "2025-01-10"))
+
+    def test_respuesta_que_empieza_tarde_da_error(self):
+        # Pedido desde 2025-01-01, pero el primer dato es del 2025-01-06:
+        # 5 días de retraso, más de los 3 de margen.
+        serie = pd.Series(
+            range(5), index=pd.date_range("2025-01-06", "2025-01-10")
+        )
+
+        self.assertTrue(_cobertura_incompleta(serie, "2025-01-01", "2025-01-10"))
+
+    def test_respuesta_que_acaba_pronto_da_error(self):
+        # Pedido hasta 2025-01-10, pero el último dato es del 2025-01-05:
+        # 5 días antes del fin, más de los 3 de margen.
+        serie = pd.Series(
+            range(5), index=pd.date_range("2025-01-01", "2025-01-05")
+        )
+
+        self.assertTrue(_cobertura_incompleta(serie, "2025-01-01", "2025-01-10"))
+
+    def test_respuesta_vacia_de_flujo_fisico_de_entrada_da_error(self):
+        serie = pd.Series(dtype="float64", index=pd.DatetimeIndex([]))
+
+        self.assertTrue(_cobertura_incompleta(serie, "2025-01-01", "2025-01-10"))
+
+    def test_margen_de_3_dias_pasa(self):
+        # Retraso/adelanto de exactamente 3 días: dentro del margen, no es error.
+        serie = pd.Series(
+            range(4), index=pd.date_range("2025-01-04", "2025-01-07")
+        )
+
+        self.assertFalse(_cobertura_incompleta(serie, "2025-01-01", "2025-01-10"))
 
 
 if __name__ == "__main__":

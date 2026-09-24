@@ -34,7 +34,7 @@ from data.eia_client import (
 from data.gie_client import get_client, fetch_gas_storage, fetch_lng
 from data.portwatch_client import fetch_chokepoint_flows
 from data.open_meteo_client import fetch_daily_temperature
-from data.entsog_client import fetch_punto, MAPA_PUNTOS_ENTRADA, PUNTOS_DOBLE_SENTIDO
+from data.entsog_client import fetch_todos_los_puntos, MAPA_PUNTOS_ENTRADA
 from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
     transform_reservas_emergencia, transform_origen_gas, transform_hdd,
@@ -397,8 +397,10 @@ def panel_entrada_gas_ue() -> None:
     falta descontar los flujos entre países de la UE, fuera del alcance de
     esta versión.
     """
-    st.subheader("Entrada de gas a la UE por origen — gasoductos (ENTSOG) y GNL (GIE ALSI)")
+    st.subheader("¿Cuánto gas entra hoy en la UE, y por dónde? — gasoductos (ENTSOG) y GNL (GIE ALSI)")
     st.caption(
+        "**Dato físico y diario, con un día de retraso.** Detecta un corte al día siguiente, pero el GNL "
+        "aparece como un solo bloque, sin país de origen: para saber de dónde viene, ver el panel siguiente.\n\n"
         "Gas que entra en la UE cada día, en GWh/día, media de los últimos 7 días. Gasoductos desde "
         "fuera de la UE (ENTSOG) agrupados por el país de donde sale el gas, no por el país fronterizo: "
         "el gas que llega por Túnez o Marruecos cuenta como argelino. El gas que sale de la UE y vuelve "
@@ -406,20 +408,10 @@ def panel_entrada_gas_ue() -> None:
         "con flujo cero y sin gas nominado es una parada real y cuenta como cero."
     )
 
-    # 1. Extracción: flujo físico y nominación de cada punto del mapa (Fase 0).
-    #    Flujo de salida solo en los puntos de doble sentido (regla de
-    #    sentido contrario, PARADA 3).
-    datos_flujo, datos_nominacion, datos_flujo_salida = {}, {}, {}
-    for punto in MAPA_PUNTOS_ENTRADA:
-        clave = (punto.point_key, punto.operator_key)
-        if clave in datos_flujo:
-            continue  # varios orígenes no comparten punto, pero por si acaso
-        datos_flujo[clave] = fetch_punto(punto.point_key, punto.operator_key, "Physical Flow")
-        datos_nominacion[clave] = fetch_punto(punto.point_key, punto.operator_key, "Nomination")
-        if punto.point_key in PUNTOS_DOBLE_SENTIDO:
-            datos_flujo_salida[clave] = fetch_punto(
-                punto.point_key, punto.operator_key, "Physical Flow", direction="exit"
-            )
+    # 1. Extracción: flujo físico, nominación y flujo de salida (puntos de
+    #    doble sentido) de todos los puntos del mapa, en paralelo y con la
+    #    caché envolviendo la descarga completa (pliego «robustez», Fase 2).
+    datos_flujo, datos_nominacion, datos_flujo_salida = fetch_todos_los_puntos()
 
     # 2. Transformación: calidad (+ sentido contrario) + GWh/d + suma por
     #    origen + media 7 días.
@@ -603,7 +595,12 @@ def panel_reservas_emergencia() -> None:
 @st.fragment
 def panel_origen_gas() -> None:
     """Panel interactivo: origen del gas importado por país o agregado UE-27."""
-    st.subheader("Origen del gas importado")
+    st.subheader("¿A quién le compramos el gas? — proveedores por país (Eurostat)")
+    st.caption(
+        "**Dato comercial y mensual, con varios meses de retraso.** Reparte también el GNL por país de "
+        "origen (por ejemplo, Estados Unidos) e incluye las compras entre países de la UE. Para ver un "
+        "corte en cuanto ocurre, ver el panel anterior."
+    )
 
     # 1. Extracción (dataset completo + diccionario de partners — cacheado)
     df_gas, dic_partner = fetch_origen_gas()
@@ -755,26 +752,26 @@ def main() -> None:
 
     # --- PASO 2: Brent+ reservas petróleo de EEUU ---
     panel_brent()
-    
+
     # --- PASO 3: Reservas de gas EU ---
     panel_reservas_eu_gas()
 
-    # --- PASO 4: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
-    panel_llegada_gas()
-
-    # --- PASO 4b: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
+    # --- PASO 4: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
     panel_entrada_gas_ue()
 
-    # --- PASO 5: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
-    panel_reservas_emergencia()
-
-    # --- PASO 6: Origen del gas importado (Eurostat nrg_ti_gasm) ---
+    # --- PASO 5: Origen del gas importado (Eurostat nrg_ti_gasm) — junto al anterior (pliego «robustez», Fase 3)
     panel_origen_gas()
 
-    # --- PASO 7: Nivel de existencias de producto en EEUU (EIA semanal) ---
+    # --- PASO 6: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
+    panel_llegada_gas()
+
+    # --- PASO 7: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
+    panel_reservas_emergencia()
+
+    # --- PASO 8: Nivel de existencias de producto en EEUU (EIA semanal) ---
     panel_nivel_producto_us()
 
-    # --- PASO 8: Metodología
+    # --- PASO 9: Metodología
     with st.expander("📋 Metodología y limitaciones"):
         st.markdown("""
         **Fuentes y frecuencias**

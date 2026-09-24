@@ -296,31 +296,67 @@ def plot_lng_utilization(
     return fig
 
 
+_COLOR_GNL_ENTRADA_GAS = "#9AA5B1"
+
+# Colores de los orígenes de gasoducto, fijados aparte del GNL (pliego
+# «robustez», Fase 5): antes de mover GNL a la primera posición del apilado,
+# `px.area` los asignaba en este orden alfabético + GNL al final, tomando la
+# paleta cualitativa por defecto (`px.colors.qualitative.Plotly`). Se fijan
+# aquí para que sigan siendo "sus colores actuales" pase lo que pase con el
+# orden de las columnas.
+_COLORES_ORIGEN_GASODUCTO = {
+    "Argelia": "#636EFA",
+    "Azerbaiyán": "#EF553B",
+    "Libia": "#00CC96",
+    "Noruega": "#AB63FA",
+    "Reino Unido (mixto)": "#FFA15A",
+    "Rusia": "#19D3F3",
+    "Turquía (mixto)": "#FF6692",
+    "Ucrania (origen sin determinar)": "#B6E880",
+}
+
+
 def plot_entrada_gas_ue(df_combinado: pd.DataFrame) -> "plotly.graph_objects.Figure":
     """Área apilada de entrada de gas a la UE por origen (gasoductos ENTSOG + GNL ALSI+).
+
+    El GNL va primero en el apilado (abajo del todo), en gris — los orígenes
+    de gasoducto se apilan encima, con sus colores de siempre (pliego
+    «robustez», Fase 5). Leyenda horizontal debajo del gráfico para que no
+    se corte ninguna etiqueta.
 
     Args:
         df_combinado: DataFrame indexado por fecha, una columna por origen
             de gasoducto más una columna 'GNL' (sendOut ALSI+ agregado UE),
             todo en GWh/d y ya suavizado con la media de 7 días (salida de
             `transform_entrada_gas_ue` + `media_7d_atras` sobre el sendOut).
+            El orden de columnas de entrada no importa: se reordena aquí
+            solo para dibujar, sin tocar los datos.
 
     Returns:
         plotly.graph_objects.Figure
     """
     import plotly.express as px
 
+    columnas_orden = ["GNL"] + [c for c in df_combinado.columns if c != "GNL"]
+    df_plot = df_combinado[columnas_orden]
+    mapa_colores = {"GNL": _COLOR_GNL_ENTRADA_GAS, **_COLORES_ORIGEN_GASODUCTO}
+
     fig = px.area(
-        df_combinado, x=df_combinado.index, y=df_combinado.columns,
+        df_plot, x=df_plot.index, y=df_plot.columns,
         title="Entrada de gas a la UE por origen — gasoductos y GNL",
         labels={"value": "GWh/día (media 7 días)", "index": "Fecha", "variable": "Origen"},
+        color_discrete_map=mapa_colores,
     )
     fig.add_vline(x="2026-02-28", line_dash="dot", line_color="black")
     fig.add_annotation(
         x="2026-02-28", y=1, yref="paper",
         text="Inicio Conflicto (28-Feb)", showarrow=True, arrowhead=1, ax=60, ay=-20
     )
-    fig.update_layout(hovermode="x unified", margin=dict(l=40, r=40, t=60, b=40))
+    fig.update_layout(
+        hovermode="x unified",
+        margin=dict(l=40, r=40, t=60, b=100),
+        legend=dict(orientation="h", yanchor="top", y=-0.25, x=0),
+    )
     return fig
 
 
