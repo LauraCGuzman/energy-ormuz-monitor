@@ -18,10 +18,11 @@ def resaltar_serie_mas_reciente(
     fig,
     color_reciente: str = "#1D3557",
     ancho_reciente: float = 3,
-    color_resto: str = "#B0B0B0",
-    ancho_resto: float = 1,
 ):
-    """Da color oscuro y grosor 3 a la serie más reciente, gris fino al resto.
+    """Da color oscuro y grosor 3 a la serie más reciente; el resto conserva
+    el color que ya traía (el de la paleta por defecto de Plotly Express),
+    sin tocarlo — cada año/temporada pasado se sigue distinguiendo de los
+    demás por su propio color, no solo por leyenda y hover.
 
     Pensada para figuras con una traza por año o temporada, coloreadas por
     categoría (`color=serie.astype(str)` en `px.line`). "Más reciente" se
@@ -40,8 +41,6 @@ def resaltar_serie_mas_reciente(
     for trazo in fig.data:
         if trazo.name == mas_reciente:
             trazo.update(line=dict(color=color_reciente, width=ancho_reciente))
-        else:
-            trazo.update(line=dict(color=color_resto, width=ancho_resto))
     return fig
 
 
