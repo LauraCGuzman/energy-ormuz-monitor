@@ -329,5 +329,6 @@ def plot_hdd_pais(df: pd.DataFrame, pais_nombre: str) -> "plotly.graph_objects.F
         render_mode="svg",
         title=f"Grados-día de calefacción — {pais_nombre}",
     )
+    resaltar_serie_mas_reciente(fig)
     fig.update_layout(hovermode="x unified", margin=dict(l=40, r=40, t=60, b=40))
     return fig
