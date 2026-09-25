@@ -13,6 +13,7 @@ Punto de entrada: `streamlit run app.py`
 """
 
 import logging
+from datetime import date, timedelta
 
 import streamlit as st
 import plotly.express as px
@@ -39,7 +40,7 @@ from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
     transform_reservas_emergencia, transform_origen_gas, transform_hdd,
     transform_entrada_gas_ue, contar_dias_sospechosos, media_7d_atras,
-    vaciar_dia_si_falta_algun_origen,
+    ultimo_dia_completo, huecos_entrada_gas_ue, formatear_huecos_entrada_gas_ue,
     NOMBRES_PAISES_UE, NOMBRES_GEO, NOMBRES_GEO_AGSI,
     NOMBRES_CHOKEPOINTS, CHOKEPOINT_DEFECTO, etiqueta_chokepoint,
     calcular_autonomias_spr, EstadoSPR, CIUDADES_HDD
@@ -411,7 +412,16 @@ def panel_entrada_gas_ue() -> None:
     # 1. Extracción: flujo físico, nominación y flujo de salida (puntos de
     #    doble sentido) de todos los puntos del mapa, en paralelo y con la
     #    caché envolviendo la descarga completa (pliego «robustez», Fase 2).
-    datos_flujo, datos_nominacion, datos_flujo_salida = fetch_todos_los_puntos()
+    #    Se descargan 7 días de calentamiento ANTES del inicio visible
+    #    (pliego «huecos-panel-entrada-gas»): la media de 7 días necesita
+    #    al menos 5 de los 7 días anteriores (`media_7d_atras`) — sin ellos,
+    #    el primer día visible siempre sale vacío, no por falta real de
+    #    dato sino porque no hay histórico detrás con el que promediar.
+    fecha_inicio_visible = date(2025, 1, 1)
+    fecha_inicio_descarga = fecha_inicio_visible - timedelta(days=7)
+    datos_flujo, datos_nominacion, datos_flujo_salida = fetch_todos_los_puntos(
+        start=fecha_inicio_descarga.isoformat()
+    )
 
     # 2. Transformación: calidad (+ sentido contrario) + GWh/d + suma por
     #    origen + media 7 días.
@@ -420,6 +430,8 @@ def panel_entrada_gas_ue() -> None:
     )
 
     # 3. Capa de GNL: sendOut de ALSI+ agregado UE, misma media de 7 días.
+    #    `fetch_lng` ya arranca en 2022 por defecto — de sobra de
+    #    calentamiento para el 7d, no hace falta tocarlo.
     api_key = st.secrets["GIE_API_KEY"]
     client_gie = get_client(api_key=api_key)
     df_lng_bruto = fetch_lng(client_gie, "EU")
@@ -429,13 +441,31 @@ def panel_entrada_gas_ue() -> None:
     df_combinado = df_gasoductos.copy()
     df_combinado["GNL"] = gnl_7d.reindex(df_combinado.index)
     df_combinado = df_combinado.dropna(how="all")
-    # Un día sin dato de cualquier origen queda vacío para todos: si no, el
-    # área apilada de Plotly rellena con 0 el que falta y sigue apilando el
-    # resto (stackgaps='infer zero'), y el hueco no se ve como hueco.
-    df_combinado = vaciar_dia_si_falta_algun_origen(df_combinado)
+    # Recorta el calentamiento: no se muestra, solo alimentaba el 7d de los
+    # primeros días visibles.
+    df_combinado = df_combinado.loc[fecha_inicio_visible.isoformat():]
+    # La figura decide, columna a columna, qué días están completos y los
+    # corta del propio rango de fechas (huecos reales, no ceros ni
+    # interpolación — ver `plot_entrada_gas_ue`). Aquí solo se necesita el
+    # último día completo (para el texto) y la lista de huecos internos
+    # (para la banda del gráfico Y la frase del caption — misma lista, para
+    # que no puedan desincronizarse entre sí).
+    ultimo_completo = ultimo_dia_completo(df_combinado)
+    huecos = huecos_entrada_gas_ue(df_combinado)
 
     # 4. Gráfico
-    st.plotly_chart(plot_entrada_gas_ue(df_combinado), width='stretch')
+    st.plotly_chart(plot_entrada_gas_ue(df_combinado, huecos), width='stretch')
+    if ultimo_completo is not None:
+        texto_caption = (
+            f"Serie hasta el {ultimo_completo:%d-%m-%Y} — el tramo posterior aún no tiene "
+            "dato completo en todos los orígenes."
+        )
+        if huecos:
+            texto_caption += (
+                "\n\nHuecos por dato incompleto: "
+                f"{formatear_huecos_entrada_gas_ue(huecos)}."
+            )
+        st.caption(texto_caption)
 
     # 5. Aviso de días sospechosos, solo si los hay en la ventana mostrada.
     n_sospechosos = contar_dias_sospechosos(

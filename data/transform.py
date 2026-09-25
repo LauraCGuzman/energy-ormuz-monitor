@@ -578,13 +578,22 @@ def vaciar_dia_si_falta_algun_origen(df: pd.DataFrame) -> pd.DataFrame:
     """Si a un día le falta el dato de CUALQUIER origen (columna), ese día
     queda vacío para TODOS los orígenes — no solo el que falta.
 
-    Motivo (comprobado con `px.area`, ver informe de la PARADA 3): cuando
-    solo algunas columnas tienen NaN ese día, Plotly (`stackgaps`, por
-    defecto `'infer zero'`) inserta un 0 en las que faltan y sigue apilando
-    las demás — el hueco no se ve como hueco, se ve como si esa columna
-    hubiera valido 0. Solo cuando TODAS las columnas faltan a la vez no hay
-    ninguna traza con dato del que "inferir cero", y con `connectgaps` en su
-    valor por defecto (`False`) Plotly deja un hueco real en el área.
+    OJO — esto NO produce por sí solo un hueco visual en `px.area`/Plotly
+    (docstring anterior lo afirmaba y era falso, ver informe de la
+    PARADA 4). En una traza `scatter` con `stackgroup`, `stackgaps` vale por
+    defecto `'infer zero'`: para cada punto con fecha válida pero valor NaN,
+    el cálculo interno de Plotly (`scatter/calc.js`, en el `.js` minificado:
+    `z[S]=..., z.gap=!0, T?(z.s=dU,m=!0):z.s=0` con `T = stackgaps ===
+    'interpolate'`) apila un 0 en ese punto — pase lo que pase en las OTRAS
+    columnas ese mismo día. Vaciar la fila entera no cambia esto: sigue
+    habiendo una fecha con un punto NaN por columna, y Plotly sigue
+    apilando 0 ahí. `connectgaps` tampoco entra en juego, porque nunca se
+    llega a descartar el punto: la fecha existe.
+
+    Esta función se usa como señal de qué días son "incompletos" (para que
+    `plot_entrada_gas_ue` los recorte del propio rango de fechas de la
+    figura — no como NaN, ausentes del todo — y los marque con una banda),
+    no para dibujar directamente el resultado con `px.area`.
 
     Args:
         df: DataFrame indexado por fecha, una columna por origen (incluida
@@ -596,6 +605,109 @@ def vaciar_dia_si_falta_algun_origen(df: pd.DataFrame) -> pd.DataFrame:
     """
     dia_completo = df.notna().all(axis=1)
     return df.where(dia_completo, other=float("nan"))
+
+
+def ultimo_dia_completo(df: pd.DataFrame) -> "pd.Timestamp | None":
+    """Última fecha en la que TODAS las columnas de `df` tienen dato.
+
+    El borde derecho real de la serie combinada de `panel_entrada_gas_ue`
+    (pliego «huecos-panel-entrada-gas»): un día reciente con algún origen
+    aún sin llegar, o cuya media de 7 días no ha madurado, no se dibuja —
+    la serie visible no debe aparentar llegar más allá de este día.
+
+    Args:
+        df: DataFrame indexado por fecha, una columna por origen.
+
+    Returns:
+        La fecha del último día completo, o `None` si `df` no tiene ningún
+        día con todas las columnas presentes.
+    """
+    completos = df.dropna(how="any")
+    return completos.index.max() if not completos.empty else None
+
+
+def huecos_entrada_gas_ue(
+    df: pd.DataFrame,
+) -> list[tuple["pd.Timestamp", "pd.Timestamp", list[str]]]:
+    """Tramos de días consecutivos con algún origen sin dato en `df`
+    (pliego «huecos-panel-entrada-gas»), con los orígenes que faltaron en
+    cada tramo.
+
+    Única fuente de esta información: tanto las bandas grises de
+    `plot_entrada_gas_ue` como la frase del caption de
+    `panel_entrada_gas_ue` que las enumera se generan a partir de la MISMA
+    lista, para que nunca puedan desincronizarse entre sí (banda sin frase,
+    o frase con una fecha que la banda no tiene).
+
+    Un tramo incompleto FINAL, sin ningún día completo después dentro de
+    `df`, no cuenta como hueco "en medio" — es el borde derecho de la serie
+    visible (ver `ultimo_dia_completo`) y se excluye: por construcción,
+    solo se registra un tramo cuando aparece un día completo que lo cierra.
+
+    Args:
+        df: DataFrame indexado por fecha, una columna por origen (incluida
+            la capa de GNL), con NaN donde a ese origen le falta el dato.
+
+    Returns:
+        Lista de (fecha_inicio, fecha_fin, orígenes_que_faltaron), en orden
+        cronológico. Un origen aparece en la lista de un tramo si le faltó
+        el dato al menos un día dentro de ese tramo. `[]` si no hay ninguno.
+    """
+    completo = df.notna().all(axis=1).to_numpy()
+    huecos = []
+    inicio = None
+    for i, dia_completo in enumerate(completo):
+        if not dia_completo and inicio is None:
+            inicio = i
+        elif dia_completo and inicio is not None:
+            sub = df.iloc[inicio:i]
+            faltan = [c for c in df.columns if sub[c].isna().any()]
+            huecos.append((df.index[inicio], df.index[i - 1], faltan))
+            inicio = None
+    return huecos
+
+
+_MESES_ABREV_ES = {
+    1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
+    7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
+}
+
+
+def _formatear_rango_corto(inicio: "pd.Timestamp", fin: "pd.Timestamp") -> str:
+    """`13–18 jun 2025`, o `28 dic 2025 – 3 ene 2026` si el tramo cruza de
+    mes o de año."""
+    mes_inicio = _MESES_ABREV_ES[inicio.month]
+    if inicio.year == fin.year and inicio.month == fin.month:
+        if inicio.day == fin.day:
+            return f"{inicio.day} {mes_inicio} {inicio.year}"
+        return f"{inicio.day}–{fin.day} {mes_inicio} {inicio.year}"
+    mes_fin = _MESES_ABREV_ES[fin.month]
+    if inicio.year == fin.year:
+        return f"{inicio.day} {mes_inicio} – {fin.day} {mes_fin} {inicio.year}"
+    return f"{inicio.day} {mes_inicio} {inicio.year} – {fin.day} {mes_fin} {fin.year}"
+
+
+def formatear_huecos_entrada_gas_ue(
+    huecos: list[tuple["pd.Timestamp", "pd.Timestamp", list[str]]],
+) -> str:
+    """`huecos_entrada_gas_ue` a texto para el caption del panel:
+    `"13–18 jun 2025: Rusia; 5–26 sep 2025: Noruega"`.
+
+    Fecha y orígenes separados por ":" (no paréntesis: un origen como
+    "Reino Unido (mixto)" ya lleva los suyos, y anidar confunde), tramos
+    entre sí separados por ";" (una coma ya separa los orígenes dentro de
+    un mismo tramo, si hay más de uno).
+
+    Args:
+        huecos: salida de `huecos_entrada_gas_ue`.
+
+    Returns:
+        Los tramos unidos por "; ", o `""` si `huecos` está vacío.
+    """
+    return "; ".join(
+        f"{_formatear_rango_corto(inicio, fin)}: {', '.join(origenes)}"
+        for inicio, fin, origenes in huecos
+    )
 
 
 def _agrupar_por_punto_fisico(mapa_puntos: list) -> list:

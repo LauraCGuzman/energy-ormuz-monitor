@@ -316,7 +316,27 @@ _COLORES_ORIGEN_GASODUCTO = {
 }
 
 
-def plot_entrada_gas_ue(df_combinado: pd.DataFrame) -> "plotly.graph_objects.Figure":
+def _tramos_consecutivos(mascara: pd.Series) -> list[tuple[int, int]]:
+    """Posiciones (start, end), ambas inclusive, de cada tramo de valores
+    `True` consecutivos en `mascara`. `[]` si no hay ninguno.
+    """
+    tramos = []
+    inicio = None
+    for i, valor in enumerate(mascara.to_numpy()):
+        if valor and inicio is None:
+            inicio = i
+        elif not valor and inicio is not None:
+            tramos.append((inicio, i - 1))
+            inicio = None
+    if inicio is not None:
+        tramos.append((inicio, len(mascara) - 1))
+    return tramos
+
+
+def plot_entrada_gas_ue(
+    df_combinado: pd.DataFrame,
+    huecos: "list[tuple[pd.Timestamp, pd.Timestamp, list[str]]]",
+) -> "plotly.graph_objects.Figure":
     """Área apilada de entrada de gas a la UE por origen (gasoductos ENTSOG + GNL ALSI+).
 
     El GNL va primero en el apilado (abajo del todo), en gris — los orígenes
@@ -324,28 +344,81 @@ def plot_entrada_gas_ue(df_combinado: pd.DataFrame) -> "plotly.graph_objects.Fig
     «robustez», Fase 5). Leyenda horizontal debajo del gráfico para que no
     se corte ninguna etiqueta.
 
+    Un día "incompleto" (algún origen sin dato en su media de 7 días) NO se
+    dibuja ni como 0 ni interpolado (pliego «huecos-panel-entrada-gas»,
+    PARADA 4): `px.area` no sirve para esto, porque una traza apilada con
+    `stackgaps` en su valor por defecto (`'infer zero'`) apila un 0 en
+    cualquier punto NaN aunque el resto de columnas también falten ese día
+    — comprobado en el propio `scatter/calc` de plotly.js (línea con
+    `T?(z.s=dU,m=!0):z.s=0`, `T = stackgaps==='interpolate'`; con
+    `'infer zero'`, `T` es `False` y el punto se apila como 0). La única
+    forma de que un punto no llegue apilable es que no exista en el `x`/`y`
+    de ninguna traza. Por eso aquí se corta la serie en tramos de días
+    completos consecutivos y cada tramo se dibuja como su propio grupo
+    apilado (`stackgroup` distinto): entre un tramo y el siguiente no hay
+    ningún punto, así que no hay nada que Plotly pueda rellenar — el hueco
+    es un hueco real en el eje.
+
+    Cada tramo de `huecos` se marca con una banda gris (`add_vrect`), SIN
+    texto — el texto que enumera fechas y orígenes va en el caption del
+    panel (`panel_entrada_gas_ue`, con `formatear_huecos_entrada_gas_ue`),
+    no aquí, para que quepa entero y no se solape con las bandas vecinas
+    cuando hay varias seguidas. Todas las trazas de un mismo origen, en
+    cualquier tramo, comparten `legendgroup` (el propio nombre del origen):
+    ocultarlo en la leyenda lo oculta en todos los tramos a la vez, no solo
+    en el primero.
+
     Args:
         df_combinado: DataFrame indexado por fecha, una columna por origen
             de gasoducto más una columna 'GNL' (sendOut ALSI+ agregado UE),
             todo en GWh/d y ya suavizado con la media de 7 días (salida de
             `transform_entrada_gas_ue` + `media_7d_atras` sobre el sendOut).
-            El orden de columnas de entrada no importa: se reordena aquí
-            solo para dibujar, sin tocar los datos.
+            NaN donde a ese origen le falta el dato ese día — sin blanquear
+            entre columnas: esta función es la que decide, columna a
+            columna, qué días están completos. El orden de columnas de
+            entrada no importa: se reordena aquí solo para dibujar, sin
+            tocar los datos.
+        huecos: salida de `data.transform.huecos_entrada_gas_ue(df_combinado)`
+            — se pasa ya calculada (no se recalcula aquí) para que las
+            bandas del gráfico y la frase del caption sean, literalmente,
+            la misma lista, y no puedan desincronizarse entre sí.
 
     Returns:
         plotly.graph_objects.Figure
     """
-    import plotly.express as px
+    import plotly.graph_objects as go
 
     columnas_orden = ["GNL"] + [c for c in df_combinado.columns if c != "GNL"]
     df_plot = df_combinado[columnas_orden]
     mapa_colores = {"GNL": _COLOR_GNL_ENTRADA_GAS, **_COLORES_ORIGEN_GASODUCTO}
 
-    fig = px.area(
-        df_plot, x=df_plot.index, y=df_plot.columns,
+    completo = df_plot.notna().all(axis=1)
+    tramos_completos = _tramos_consecutivos(completo)
+
+    fig = go.Figure()
+    for indice_tramo, (a, b) in enumerate(tramos_completos):
+        sub = df_plot.iloc[a:b + 1]
+        for columna in df_plot.columns:
+            fig.add_trace(go.Scatter(
+                x=sub.index, y=sub[columna],
+                name=columna, legendgroup=columna,
+                showlegend=(indice_tramo == 0),
+                mode="lines", stackgroup=f"tramo{indice_tramo}",
+                line=dict(width=0.5, color=mapa_colores.get(columna)),
+                fillcolor=mapa_colores.get(columna),
+                hoverinfo="x+y+name",
+            ))
+
+    for inicio, fin, _origenes in huecos:
+        fig.add_vrect(
+            x0=inicio, x1=fin,
+            fillcolor="lightgray", opacity=0.4, line_width=0,
+        )
+
+    fig.update_layout(
         title="Entrada de gas a la UE por origen — gasoductos y GNL",
-        labels={"value": "GWh/día (media 7 días)", "index": "Fecha", "variable": "Origen"},
-        color_discrete_map=mapa_colores,
+        yaxis_title="GWh/día (media 7 días)",
+        xaxis_title="Fecha",
     )
     fig.add_vline(x="2026-02-28", line_dash="dot", line_color="black")
     fig.add_annotation(
