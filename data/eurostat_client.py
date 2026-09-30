@@ -6,6 +6,7 @@ Usa la librería `eurostat` que accede a la SDMX REST API de Eurostat.
 Datasets utilizados:
     - nrg_stk_oem  : reservas de emergencia de petróleo en días de autonomía (NR)
     - nrg_ti_gasm  : origen del gas natural importado por país (TJ_GCV)
+    - nrg_ti_oilm  : importaciones mensuales de gasóleo (O4671) por origen (THS_T)
 """
 
 import pandas as pd
@@ -42,4 +43,17 @@ def fetch_origen_gas() -> tuple[pd.DataFrame, dict]:
     return df, dic_partner
 
 
+@st.cache_data(ttl=3600)
+def fetch_importaciones_gasoleo_us_total() -> pd.DataFrame:
+    """Descarga nrg_ti_oilm: importaciones de gasóleo (O4671) de la UE-27 y España, en bruto.
 
+    Partner `US` (Estados Unidos) y `TOTAL` (todas las procedencias), en miles de
+    toneladas (THS_T), desde 2023-01. Los vacíos llegan mezclados como NaN y None.
+
+    Returns:
+        DataFrame crudo de la librería eurostat: columnas freq, siec, partner,
+        unit, geo\\TIME_PERIOD y una columna por mes (YYYY-MM).
+    """
+    return eurostat.get_data_df('nrg_ti_oilm', filter_pars={
+        'startPeriod': '2023-01', 'siec': ['O4671'], 'partner': ['US', 'TOTAL'],
+        'geo': ['EU27_2020', 'ES'], 'unit': ['THS_T']})

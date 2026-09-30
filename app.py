@@ -30,7 +30,8 @@ logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(m
 # Imports de extracción y transformación (asumiendo estructura de paquete 'data')
 from data.eia_client import (
     fetch_brent_spot, fetch_spr_stocks, fetch_comercial_stocks,
-    fetch_destilado_stocks, fetch_jet_stocks,
+    fetch_destilado_stocks, fetch_jet_stocks, fetch_destilado_supplied,
+    fetch_destilado_exports, fetch_destilado_exports_destino, PERIMETRO_DESTINOS,
 )
 from data.gie_client import get_client, fetch_gas_storage, fetch_lng
 from data.portwatch_client import fetch_chokepoint_flows
@@ -43,14 +44,17 @@ from data.transform import (
     ultimo_dia_completo, huecos_entrada_gas_ue, formatear_huecos_entrada_gas_ue,
     NOMBRES_PAISES_UE, NOMBRES_GEO, NOMBRES_GEO_AGSI,
     NOMBRES_CHOKEPOINTS, CHOKEPOINT_DEFECTO, etiqueta_chokepoint,
-    calcular_autonomias_spr, EstadoSPR, CIUDADES_HDD
+    calcular_autonomias_spr, EstadoSPR, CIUDADES_HDD,
+    transform_cobertura_us, transform_exports_destino, transform_cuota_us,
+    ultimo_mes_publicado, media_movil_4_semanas,
 )
 from data.eurostat_client import (
-    fetch_reservas_emergencia, fetch_origen_gas,
+    fetch_reservas_emergencia, fetch_origen_gas, fetch_importaciones_gasoleo_us_total,
 )
 from utils.charts import (
     plot_reservas_emergencia, plot_origen_gas, plot_lng_utilization, plot_hdd_pais,
     plot_entrada_gas_ue, resaltar_serie_mas_reciente,
+    plot_exports_semanales, plot_cobertura_us, plot_exports_destino, plot_cuota_us,
 )
 
 
@@ -767,6 +771,101 @@ def panel_nivel_producto_us() -> None:
         "urgencia real de suministro a corto plazo tras el cierre de Ormuz."
     )
 
+NOMBRES_DESTINO_EXPORTS = {"UE27": "UE-27", "ES": "España", "GBR": "Reino Unido", "NOR": "Noruega"}
+NOMBRES_GEO_CUOTA = {"EU27_2020": "UE-27", "ES": "España"}
+
+
+def _diesel_exports_semanales(API_KEY) -> None:
+    """Gráfico 1: exportaciones semanales de destilado de EE. UU. (kb/d) + media de 4 semanas."""
+    st.markdown("#### Exportaciones semanales de destilado de EE. UU.")
+    bruta = transform_eia(fetch_destilado_exports(API_KEY))["value"]
+    if bruta.empty:
+        st.warning("No hay datos de exportaciones semanales.")
+        return
+    st.plotly_chart(plot_exports_semanales(bruta, media_movil_4_semanas(bruta)), width='stretch')
+    st.caption(
+        "Estimación semanal de la EIA a partir de datos de aduanas; el dato mensual la corrige "
+        "±8 % mes a mes. La media de 4 semanas es un cálculo propio (estimación): no se dibuja en "
+        "las tres primeras semanas ni en las ventanas con una semana ausente. "
+        f"Datos hasta {bruta.index.max():%d-%m-%Y}."
+    )
+
+
+def _diesel_cobertura(API_KEY) -> None:
+    """Gráfico 2: días de cobertura de destilado en EE. UU. (existencias / product supplied)."""
+    st.markdown("#### Días de cobertura de destilado en EE. UU.")
+    dias = transform_cobertura_us(
+        fetch_destilado_stocks(API_KEY), fetch_destilado_supplied(API_KEY))["dias"]
+    if dias.dropna().empty:
+        st.warning("No hay datos para calcular los días de cobertura.")
+        return
+    st.plotly_chart(plot_cobertura_us(dias), width='stretch')
+    st.caption(
+        "Días de cobertura = existencias comerciales de destilado (WDISTUS1, miles de barriles) ÷ "
+        "product supplied de destilado (WDIUPUS2, miles de barriles/día). Las semanas sin dato en "
+        "una de las dos series, o con product supplied ≤ 0, quedan en blanco. "
+        f"Datos hasta {dias.dropna().index.max():%d-%m-%Y}."
+    )
+
+
+def _diesel_exports_destino(API_KEY) -> None:
+    """Gráfico 3: exportaciones mensuales por destino (miles de barriles), sin apilar."""
+    st.markdown("#### Exportaciones mensuales de destilado por destino")
+    series = tuple(dict.fromkeys(s for v in PERIMETRO_DESTINOS.values() for s in v))
+    bruto = fetch_destilado_exports_destino(API_KEY, series)
+    ultimo = ultimo_mes_publicado(bruto)
+    destinos = transform_exports_destino(bruto, ultimo, PERIMETRO_DESTINOS)
+    if destinos.empty:
+        st.warning("No hay datos de exportaciones por destino.")
+        return
+    st.plotly_chart(plot_exports_destino(destinos, NOMBRES_DESTINO_EXPORTS), width='stretch')
+    st.caption(
+        "Mes sin envíos registrados = 0 (verificado contra el total de EE. UU.). El destino es el "
+        "primer puerto declarado: el diésel que llega a España vía terceros países no figura como "
+        "España. España está incluida en la UE-27; Reino Unido y Noruega quedan fuera del agregado. "
+        f"Datos hasta {destinos.index.max():%m-%Y}; los últimos meses pueden ser provisionales."
+    )
+
+
+def _diesel_cuota(_API_KEY=None) -> None:
+    """Gráfico 4: cuota de EE. UU. en las importaciones de gasóleo (%), UE-27 y España."""
+    st.markdown("#### Peso de EE. UU. en las importaciones europeas de gasóleo")
+    cuota = transform_cuota_us(fetch_importaciones_gasoleo_us_total())
+    if cuota.dropna(how="all").empty:
+        st.warning("No hay datos de cuota de EE. UU. en las importaciones.")
+        return
+    st.plotly_chart(plot_cuota_us(cuota, NOMBRES_GEO_CUOTA), width='stretch')
+    ultimos = " · ".join(
+        f"{NOMBRES_GEO_CUOTA[c]} {cuota[c].dropna().index.max():%m-%Y}"
+        for c in cuota.columns if not cuota[c].dropna().empty
+    )
+    st.caption(
+        "Cuota de EE. UU. sobre el total de importaciones de gasóleo (O4671), en %. Origen último "
+        "según la definición de Eurostat (ESMS anual): por eso España puede tener cuota > 0 en "
+        "meses con 0 envíos directos según la EIA. Miles de toneladas; el último mes varía por "
+        f"país. Datos hasta: {ultimos}. Los últimos meses pueden ser provisionales."
+    )
+
+
+def panel_diesel_us_europa() -> None:
+    """Panel: diésel de EE. UU. hacia Europa — exportaciones, cobertura y peso en las importaciones."""
+    st.subheader("Diésel de EE. UU. hacia Europa: exportaciones, cobertura y cuota en las importaciones")
+    API_KEY = st.secrets['EIA_API_KEY']
+
+    # Cada bloque es independiente: si uno falla, los demás se siguen dibujando.
+    for nombre, bloque in (
+        ("exportaciones semanales", _diesel_exports_semanales),
+        ("días de cobertura", _diesel_cobertura),
+        ("exportaciones por destino", _diesel_exports_destino),
+        ("cuota de EE. UU. en las importaciones", _diesel_cuota),
+    ):
+        try:
+            bloque(API_KEY)
+        except Exception as e:  # noqa: BLE001 - un fallo de red/formato no debe tumbar el panel
+            logging.warning("Panel diésel, bloque «%s»: %s: %s", nombre, type(e).__name__, e)
+            st.warning(f"No se pudo mostrar «{nombre}»: fallo al obtener o procesar los datos ({type(e).__name__}).")
+
+
 def main() -> None:
     """Punto de entrada del dashboard."""
     st.title("Monitor Energético Europa/Ormuz")
@@ -801,7 +900,10 @@ def main() -> None:
     # --- PASO 8: Nivel de existencias de producto en EEUU (EIA semanal) ---
     panel_nivel_producto_us()
 
-    # --- PASO 9: Metodología
+    # --- PASO 9: Diésel de EE. UU. hacia Europa (EIA + Eurostat nrg_ti_oilm) ---
+    panel_diesel_us_europa()
+
+    # --- PASO 10: Metodología
     with st.expander("📋 Metodología y limitaciones"):
         st.markdown("""
         **Fuentes y frecuencias**
@@ -810,9 +912,12 @@ def main() -> None:
         | IMF PortWatch | Tráfico marítimo (señales AIS) | Diaria |
         | EIA | Brent spot | Diaria |
         | EIA | Reservas de crudo (SPR y comerciales) y productos | Semanal |
+        | EIA | Exportaciones de destilado de EE. UU. (total) | Semanal |
+        | EIA | Exportaciones de destilado de EE. UU. por país de destino | Mensual |
         | GIE AGSI+ | Reservas de gas subterráneo | Diaria |
         | ENTSOG | Entrada de gas por gasoducto (flujo físico y nominación) | Diaria |
         | Eurostat | Reservas de emergencia y origen del gas | Mensual |
+        | Eurostat | Importaciones de gasóleo por origen (nrg_ti_oilm) | Mensual |
 
         **Desfases de publicación**
         - La EIA publica los miércoles la semana cerrada el viernes anterior: entre 5 y 12 días de retraso según el día de consulta.

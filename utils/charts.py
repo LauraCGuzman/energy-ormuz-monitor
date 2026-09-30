@@ -468,3 +468,79 @@ def plot_hdd_pais(df: pd.DataFrame, pais_nombre: str) -> "plotly.graph_objects.F
     resaltar_serie_mas_reciente(fig)
     fig.update_layout(hovermode="x unified", margin=dict(l=40, r=40, t=60, b=40))
     return fig
+
+
+# ── Panel diésel EE. UU. → Europa ─────────────────────────────────────────────
+# Todas las líneas van sin apilar y con `connectgaps=False`: un NaN es un hueco
+# visible, nunca una interpolación ni un 0.
+
+FECHA_CONFLICTO = "2026-02-28"
+
+
+def _marcar_conflicto(fig):
+    fig.add_vline(x=FECHA_CONFLICTO, line_width=1.5, line_dash="dash", line_color="orange")
+    fig.add_annotation(
+        x=FECHA_CONFLICTO, y=1.02, yref="paper",
+        text="Inicio Conflicto (28-Feb)", showarrow=True, arrowhead=1, ax=60, ay=-15,
+    )
+
+
+def _figura_lineas(series: dict, colores: dict, titulo_y: str, hover: str, marcadores: bool = False):
+    """Una traza por serie (pd.Series con índice de fechas), sin apilar y con huecos reales."""
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    for nombre, serie in series.items():
+        fig.add_trace(go.Scatter(
+            x=serie.index, y=serie.values, name=nombre,
+            mode="lines+markers" if marcadores else "lines",
+            marker=dict(size=5),
+            line=dict(color=colores[nombre], width=2.5),
+            connectgaps=False,
+            hovertemplate=hover,
+        ))
+    _marcar_conflicto(fig)
+    fig.update_yaxes(title_text=titulo_y)
+    fig.update_layout(
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.08, x=0, xanchor="left"),
+        margin=dict(l=40, r=40, t=40, b=40),
+    )
+    return fig
+
+
+def plot_exports_semanales(bruta: pd.Series, media_4s: pd.Series):
+    """Exportaciones semanales de destilado (kb/d): serie bruta y media de 4 semanas."""
+    return _figura_lineas(
+        {"Semanal (bruta)": bruta, "Media de 4 semanas": media_4s},
+        {"Semanal (bruta)": "#A8C0D8", "Media de 4 semanas": "#1D3557"},
+        "Exportaciones (kb/d)", "%{y:,.0f} kb/d",
+    )
+
+
+def plot_cobertura_us(dias: pd.Series):
+    """Días de cobertura de destilado en EE. UU. (existencias / product supplied)."""
+    return _figura_lineas(
+        {"Días de cobertura": dias}, {"Días de cobertura": "#1D3557"},
+        "Días", "%{y:,.1f} días",
+    )
+
+
+def plot_exports_destino(df: pd.DataFrame, nombres: dict):
+    """Exportaciones mensuales por destino (miles de barriles), una línea por columna de `df`."""
+    colores = {"UE27": "#1D3557", "ES": "#E63946", "GBR": "#457B9D", "NOR": "#2A9D8F"}
+    return _figura_lineas(
+        {nombres[c]: df[c] for c in df.columns},
+        {nombres[c]: colores.get(c, "#888888") for c in df.columns},
+        "Exportaciones (miles de barriles)", "%{y:,.0f} kbbl", marcadores=True,
+    )
+
+
+def plot_cuota_us(cuota: pd.DataFrame, nombres: dict):
+    """Cuota de EE. UU. en las importaciones de gasóleo (%), una línea por GEO."""
+    colores = {"EU27_2020": "#1D3557", "ES": "#E63946"}
+    return _figura_lineas(
+        {nombres[c]: cuota[c] for c in cuota.columns},
+        {nombres[c]: colores.get(c, "#888888") for c in cuota.columns},
+        "Cuota de EE. UU. (%)", "%{y:.1f} %", marcadores=True,
+    )
