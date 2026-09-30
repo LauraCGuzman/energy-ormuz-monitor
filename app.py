@@ -224,8 +224,8 @@ def panel_brent() -> None:
         "su capacidad de extracción decae conforme se vacían las cavernas. Las reservas comerciales (EIA WCESTUS1, excluyen la SPR) "
         "son stock de trabajo en refinerías, terminales y oleoductos. Los dos suelos son referencias analíticas propias, no cifras oficiales: "
         f"{SUELO_TECNICO_SPR/1000:.0f}M bbl (extracción de la SPR ya degradada) y {SUELO_OPERATIVO_COMERCIAL/1000:.0f}M bbl (mínimo operativo comercial estimado: llenado de oleoductos y fondos de tanque). "
-        "Brent: precio spot. El crudo conserva holgura sobre ambos suelos; la urgencia de suministro se mide en la cobertura de productos "
-        "(destilado y jet): ver el panel siguiente."
+        "Brent: precio spot. El crudo conserva holgura sobre ambos suelos; la urgencia de suministro se mide en los productos: "
+        "existencias de destilado y jet, y días de cobertura de destilado; ver el panel siguiente."
     )
 
 @st.fragment
