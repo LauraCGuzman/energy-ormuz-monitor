@@ -230,43 +230,71 @@ def _semanal(fechas, valores, serie="X"):
 VIERNES = ["2026-08-28", "2026-09-04", "2026-09-11", "2026-09-18"]
 
 
+SEMANAS8 = [f.strftime("%Y-%m-%d") for f in pd.date_range("2026-08-07", periods=8, freq="7D")]  # 8 viernes
+
+
 class TestCobertura(unittest.TestCase):
-    def test_fechas_iguales_mismo_resultado_que_antes(self):
-        stock = _semanal(VIERNES, [120000, 121000, 122000, 123000])
-        supply = _semanal(VIERNES, [3800, 3900, 4000, 4100])
-        # Implementación anterior (merge_asof, tolerancia 7 d) como referencia.
-        s = transform_eia(stock).reset_index().rename(columns={"period": "fecha", "value": "stock"})
-        d = transform_eia(supply).reset_index().rename(columns={"period": "fecha", "value": "supply"})
-        antes = pd.merge_asof(s, d, on="fecha", tolerance=pd.Timedelta("7D")).set_index("fecha").dropna()
-        antes["dias"] = antes["stock"] / antes["supply"]
-        r = transform_cobertura_us(stock, supply)
-        pd.testing.assert_frame_equal(r, antes[["dias"]])
+    """Días = stock / media de 4 semanas del product supplied (como los «days of supply» de la EIA)."""
 
-    def test_semana_ausente_en_supply_es_nan_no_la_anterior(self):
-        stock = _semanal(VIERNES, [120000, 121000, 122000, 123000])
-        supply = _semanal([f for f in VIERNES if f != "2026-09-11"], [3800, 3900, 4100])
-        r = transform_cobertura_us(stock, supply)
-        self.assertTrue(np.isnan(r.loc["2026-09-11", "dias"]))
-        self.assertNotEqual(r.loc["2026-09-11", "dias"], 122000 / 3900)
-        self.assertAlmostEqual(r.loc["2026-09-18", "dias"], 123000 / 4100)
+    def _stock(self, sin=None):
+        """Stock de 8 semanas (120000, 121000, ...); `sin` = índice de la semana que falta."""
+        return _semanal(*self._sin([120000 + 1000 * i for i in range(8)], sin))
 
-    def test_semana_ausente_en_stock_es_nan(self):
-        stock = _semanal([f for f in VIERNES if f != "2026-09-04"], [120000, 122000, 123000])
-        supply = _semanal(VIERNES, [3800, 3900, 4000, 4100])
-        self.assertTrue(np.isnan(transform_cobertura_us(stock, supply).loc["2026-09-04", "dias"]))
+    def _supply(self, valores=None, sin=None):
+        """Supply de 8 semanas (3800, 3900, ...); `sin` = índice de la semana que falta."""
+        return _semanal(*self._sin(valores or [3800 + 100 * i for i in range(8)], sin))
 
-    def test_supply_cero_o_negativo_es_nan_no_inf(self):
-        stock = _semanal(VIERNES, [120000] * 4)
-        supply = _semanal(VIERNES, [3800, 0, -5, 4100])
+    @staticmethod
+    def _sin(valores, sin):
+        idx = [i for i in range(8) if i != sin]
+        return [SEMANAS8[i] for i in idx], [valores[i] for i in idx]
+
+    def test_denominador_es_la_media_de_4_semanas(self):
+        stock, supply = self._stock(), self._supply()
         r = transform_cobertura_us(stock, supply)["dias"]
-        self.assertTrue(np.isnan(r.iloc[1]) and np.isnan(r.iloc[2]))
+        s = transform_eia(stock)["value"]
+        media = transform_eia(supply)["value"].rolling(4).mean()  # 8 semanas seguidas: sin huecos
+        pd.testing.assert_series_equal(r.dropna(), (s / media).dropna(), check_names=False, check_freq=False)
+        # Última semana: stock / media de las 4 últimas semanas de supply, no la semana suelta.
+        self.assertAlmostEqual(r.iloc[-1], 127000 / np.mean([4200, 4300, 4400, 4500]))
+        self.assertNotAlmostEqual(r.iloc[-1], 127000 / 4500)
+
+    def test_la_serie_empieza_en_la_cuarta_semana(self):
+        r = transform_cobertura_us(self._stock(), self._supply())["dias"]
+        self.assertTrue(r.iloc[:3].isna().all())    # 1.ª, 2.ª y 3.ª semana: sin ventana completa
+        self.assertTrue(r.iloc[3:].notna().all())   # desde la 4.ª
+        self.assertEqual(r.first_valid_index(), pd.Timestamp(SEMANAS8[3]))
+
+    def test_semana_ausente_en_supply_anula_cuatro_valores(self):
+        supply = self._supply(sin=3)  # falta la semana 4 de 8
+        r = transform_cobertura_us(self._stock(), supply)["dias"]
+        # Con las 8 semanas hay 5 valores (semanas 4..8); al faltar la 4.ª, esa semana y las 3
+        # siguientes tienen una ventana con hueco: solo queda la 8.ª semana.
+        self.assertEqual(int(r.notna().sum()), 1)
+        self.assertTrue(r.loc[SEMANAS8[3]:SEMANAS8[6]].isna().all())  # las 4 ventanas con el hueco
+        self.assertAlmostEqual(r.iloc[-1], 127000 / np.mean([4200, 4300, 4400, 4500]))  # ventana sin el hueco
+        self.assertNotEqual(r.loc[SEMANAS8[3]], r.loc[SEMANAS8[2]])  # no arrastra la semana anterior
+
+    def test_una_semana_ausente_anula_exactamente_cuatro_de_los_valores_que_habria(self):
+        base = int(transform_cobertura_us(self._stock(), self._supply())["dias"].notna().sum())  # 5
+        r = transform_cobertura_us(self._stock(), self._supply(sin=3))["dias"]
+        self.assertEqual(base - int(r.notna().sum()), 4)
+
+    def test_semana_ausente_en_stock_anula_solo_esa_semana(self):
+        r = transform_cobertura_us(self._stock(sin=5), self._supply())["dias"]
+        self.assertTrue(np.isnan(r.loc[SEMANAS8[5]]))
+        self.assertEqual(int(r.notna().sum()), 4)  # 5 valores posibles, uno menos
+
+    def test_media_de_supply_cero_o_negativa_es_nan_no_inf(self):
+        supply = self._supply(valores=[0, 0, 0, 0, -5, -5, -5, -5])
+        r = transform_cobertura_us(self._stock(), supply)["dias"]
+        self.assertTrue(r.isna().all())
         self.assertFalse(np.isinf(r).any())
 
     def test_vacio_ante_vacio(self):
-        stock = _semanal(VIERNES, [120000] * 4)
         vacio = pd.DataFrame(columns=["period", "series", "value"])
-        self.assertTrue(transform_cobertura_us(stock, vacio).empty)
-        self.assertTrue(transform_cobertura_us(vacio, stock).empty)
+        self.assertTrue(transform_cobertura_us(self._stock(), vacio).empty)
+        self.assertTrue(transform_cobertura_us(vacio, self._supply()).empty)
 
 
 # ── Fechas semanales y media de 4 semanas ─────────────────────────────────────

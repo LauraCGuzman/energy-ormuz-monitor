@@ -332,21 +332,27 @@ def transform_origen_gas(df_gas: "pd.DataFrame", geo: str) -> "pd.DataFrame | No
 def transform_cobertura_us(df_stock_raw, df_supply_raw):
     """Días de cobertura de productos petrolíferos en EEUU.
 
-    US Product Supplied (WDIUPUS2/WKJUPUS2) ya viene en miles bbl/día — es una tasa.
-    No se divide por días del mes. Días = stock_kbbl / supply_kbbl_per_día.
-    Dividir por días del mes daría un resultado ~30× sobreestimado (bug crítico).
+    Días = stock_kbbl / media de 4 semanas del supply_kbbl_per_día. Es el cálculo
+    que publica la EIA para sus «days of supply» (nota del This Week in Petroleum:
+    «U.S. total distillate stocks / Four-week average U.S. distillate fuel oil demand»).
 
-    Unión exacta por fecha (las dos series semanales caen en el mismo viernes). Una
-    semana ausente en cualquiera de las dos, o `supply <= 0`, da NaN: nunca se
-    empareja con la semana anterior (el `merge_asof` con tolerancia de 7 días lo
-    hacía en silencio) ni se devuelve `inf`.
+    US Product Supplied (WDIUPUS2/WKJUPUS2) ya viene en miles bbl/día — es una tasa.
+    No se divide por días del mes. Dividir por días del mes daría un resultado ~30×
+    sobreestimado (bug crítico).
+
+    Denominador: `media_movil_4_semanas` (`rolling(4, min_periods=4)` sobre rejilla
+    semanal continua): la serie empieza en la 4ª semana y una semana ausente en
+    `supply` anula las 4 ventanas que la contienen. Unión exacta por fecha con el
+    stock (sin `merge_asof`, que emparejaba en silencio con la semana anterior).
+    Semana ausente en el stock, o media de supply <= 0, da NaN: nunca `inf`.
     """
     stock = transform_eia(df_stock_raw)["value"]
     supply = transform_eia(df_supply_raw)["value"]
     if stock.empty or supply.empty:
         return pd.DataFrame({"dias": pd.Series(dtype=float)}, index=pd.DatetimeIndex([], name="fecha"))
 
-    unidas = pd.concat({"stock": stock, "supply": supply}, axis=1, sort=True)
+    supply_4s = media_movil_4_semanas(supply)
+    unidas = pd.concat({"stock": stock, "supply": supply_4s}, axis=1, sort=True)
     unidas.index.name = "fecha"
     unidas["dias"] = unidas["stock"] / unidas["supply"].where(unidas["supply"] > 0)
     return unidas[["dias"]]

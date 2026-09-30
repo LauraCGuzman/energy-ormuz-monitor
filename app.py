@@ -802,8 +802,10 @@ def _diesel_cobertura(API_KEY) -> None:
     st.plotly_chart(plot_cobertura_us(dias), width='stretch')
     st.caption(
         "Días de cobertura = existencias comerciales de destilado (WDISTUS1, miles de barriles) ÷ "
-        "product supplied de destilado (WDIUPUS2, miles de barriles/día). Las semanas sin dato en "
-        "una de las dos series, o con product supplied ≤ 0, quedan en blanco. "
+        "media de 4 semanas del product supplied de destilado (WDIUPUS2, miles de barriles/día): el "
+        "mismo cálculo que la EIA aplica a sus «days of supply». No hay dato en las tres primeras "
+        "semanas; una semana ausente en cualquiera de las series deja en blanco las semanas cuya "
+        "ventana la incluye, y una media ≤ 0 también. "
         f"Datos hasta {dias.dropna().index.max():%d-%m-%Y}."
     )
 
