@@ -909,11 +909,11 @@ def main() -> None:
     # --- PASO 7: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
     panel_entrada_gas_ue()
 
-    # --- PASO 8: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
-    panel_llegada_gas()
-
-    # --- PASO 9: Origen del gas importado (Eurostat nrg_ti_gasm) ---
+    # --- PASO 8: Origen del gas importado (Eurostat nrg_ti_gasm) — junto al anterior (pliego «robustez», Fase 3)
     panel_origen_gas()
+
+    # --- PASO 9: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
+    panel_llegada_gas()
 
     # --- PASO 10: Metodología
     with st.expander("📋 Metodología y limitaciones"):
