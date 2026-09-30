@@ -58,12 +58,20 @@ from utils.charts import (
 )
 
 
+# Enlaces de contacto: la barra superior de Streamlit no admite iconos ni enlaces propios
+# (solo `menu_items` de `set_page_config`), así que van en el menú «About» y bajo el título.
+URL_LINKEDIN = "https://www.linkedin.com/in/lauracguzman"
+URL_CV = "https://www.getmanfred.com/es/candidaturas/0af5a1f8-7374-4d0e-bc76-07b5c5365ed7"
+
 # Configuración de la página (debe ser la primera llamada a st)
 st.set_page_config(
     page_title="Monitor Energético Ormuz",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={
+        "About": f"**Monitor Energético Europa/Ormuz**\n\nContacto: [LinkedIn]({URL_LINKEDIN}) · [CV]({URL_CV})",
+    },
 )
 
 # --- CONSTANTES DE NEGOCIO (NIVEL DE MÓDULO) ---
@@ -874,9 +882,42 @@ def panel_diesel_us_europa() -> None:
             st.warning(f"No se pudo mostrar «{nombre}»: fallo al obtener o procesar los datos ({type(e).__name__}).")
 
 
+# Iconos SVG inline (sin dependencias): LinkedIn (Simple Icons, CC0) y documento (Feather, MIT).
+_SVG_LINKEDIN = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" '
+    'aria-hidden="true"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 '
+    '1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 '
+    '5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 '
+    '2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 '
+    '.774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 '
+    '22.222 0h.003z"/></svg>'
+)
+_SVG_CV = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" '
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>'
+    '<path d="M8 13h8M8 17h8"/></svg>'
+)
+
+
+def enlaces_contacto() -> None:
+    """Dos enlaces discretos con icono (LinkedIn y CV) bajo el título."""
+    estilo = ("display:inline-flex;align-items:center;gap:0.35rem;color:#5b6b7c;"
+              "text-decoration:none;font-size:0.85rem;")
+    enlaces = [("LinkedIn", URL_LINKEDIN, _SVG_LINKEDIN), ("CV", URL_CV, _SVG_CV)]
+    html = "".join(
+        f'<a href="{url}" target="_blank" rel="noopener noreferrer" title="{nombre}" style="{estilo}">'
+        f'{svg}<span>{nombre}</span></a>'
+        for nombre, url, svg in enlaces
+    )
+    st.markdown(f'<div style="display:flex;gap:1.1rem;margin:-0.6rem 0 0.4rem 0;">{html}</div>',
+                unsafe_allow_html=True)
+
+
 def main() -> None:
     """Punto de entrada del dashboard."""
     st.title("Monitor Energético Europa/Ormuz")
+    enlaces_contacto()
     st.text(
     "¿Cómo de expuesto está el suministro energético europeo al cierre del "
     "Estrecho de Ormuz, y cuánto colchón queda? Dashboard de seguridad "
