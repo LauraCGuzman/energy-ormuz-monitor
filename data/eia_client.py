@@ -1,6 +1,21 @@
+import re
+from urllib.parse import quote, quote_plus
+
 import requests
 import pandas as pd
 import streamlit as st
+
+
+_TIMEOUT = (10, 60)  # (conexión, lectura) en segundos
+
+
+def _redactar(texto, API_KEY):
+    """Sustituye la clave por *** en un texto (tal cual, codificada en URL o como api_key=...)."""
+    texto = str(texto)
+    for variante in {API_KEY, quote(API_KEY, safe=''), quote_plus(API_KEY)}:
+        if variante:
+            texto = texto.replace(variante, '***')
+    return re.sub(r'(api_key=)[^&\s\'")]+', r'\1***', texto)
 
 
 def _eia_get(API_KEY, url_base, series_id, frecuencia, start):
@@ -16,11 +31,22 @@ def _eia_get(API_KEY, url_base, series_id, frecuencia, start):
         'sort[0][column]': 'period',
         'sort[0][direction]': 'asc'
     }
-    respuesta = requests.get(url_base, params=parametros)
-    if respuesta.status_code != 200:
-        print(f"❌ Error EIA {series_id}. Status: {respuesta.status_code}")
-        print(f"Detalle: {respuesta.text[:300]}")
-        respuesta.raise_for_status()
+    try:
+        respuesta = requests.get(url_base, params=parametros, timeout=_TIMEOUT)
+        if respuesta.status_code != 200:
+            print(f"❌ Error EIA {series_id}. Status: {respuesta.status_code}")
+            print(f"Detalle: {_redactar(respuesta.text[:300], API_KEY)}")
+            respuesta.raise_for_status()
+    except requests.RequestException as e:
+        # Los mensajes de requests/urllib3 incluyen la URL con la query string
+        # (api_key=...). Se relanza redactado y `from None` corta la cadena de
+        # excepciones, cuya traza volvería a mostrar la URL original.
+        mensaje = _redactar(e, API_KEY)
+        try:
+            nueva = type(e)(mensaje)
+        except Exception:
+            nueva = requests.RequestException(mensaje)
+        raise nueva from None
     datos_json = respuesta.json()
     total_disponible = int(datos_json['response']['total'])
     lista_datos = datos_json['response']['data']

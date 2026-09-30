@@ -815,7 +815,7 @@ def main() -> None:
         | Eurostat | Reservas de emergencia y origen del gas | Mensual |
 
         **Desfases de publicación**
-        - Las series semanales de la EIA llegan con 2–3 días de retraso sobre el período que cubren.
+        - La EIA publica los miércoles la semana cerrada el viernes anterior: entre 5 y 12 días de retraso según el día de consulta.
         - Los datasets mensuales de Eurostat llegan con varios meses de desfase: los últimos
         movimientos (p. ej. la liberación coordinada de reservas de la IEA) aún no aparecen
         reflejados en los paneles basados en Eurostat.

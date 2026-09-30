@@ -8,6 +8,11 @@ backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f5f5f5"
 textColor = "#262730"
 
+[client]
+# "type": el navegador muestra solo el tipo de excepción y un mensaje genérico;
+# mensaje completo y traza (que podrían llevar la URL de la EIA) solo en consola.
+showErrorDetails = "type"
+
 [server]
 headless = true
 
