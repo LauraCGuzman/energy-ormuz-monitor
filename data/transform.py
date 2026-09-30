@@ -1,4 +1,5 @@
 import logging
+import re
 
 import pandas as pd
 from gie.agsi_mappings import AGSICountry
@@ -334,24 +335,21 @@ def transform_cobertura_us(df_stock_raw, df_supply_raw):
     US Product Supplied (WDIUPUS2/WKJUPUS2) ya viene en miles bbl/día — es una tasa.
     No se divide por días del mes. Días = stock_kbbl / supply_kbbl_per_día.
     Dividir por días del mes daría un resultado ~30× sobreestimado (bug crítico).
+
+    Unión exacta por fecha (las dos series semanales caen en el mismo viernes). Una
+    semana ausente en cualquiera de las dos, o `supply <= 0`, da NaN: nunca se
+    empareja con la semana anterior (el `merge_asof` con tolerancia de 7 días lo
+    hacía en silencio) ni se devuelve `inf`.
     """
-    stock = transform_eia(df_stock_raw)
-    supply = transform_eia(df_supply_raw)
+    stock = transform_eia(df_stock_raw)["value"]
+    supply = transform_eia(df_supply_raw)["value"]
+    if stock.empty or supply.empty:
+        return pd.DataFrame({"dias": pd.Series(dtype=float)}, index=pd.DatetimeIndex([], name="fecha"))
 
-    # merge_asof requiere columnas, no índice
-    df_s = stock.reset_index().rename(columns={'period': 'fecha', 'value': 'stock'})
-    df_d = supply.reset_index().rename(columns={'period': 'fecha', 'value': 'supply'})
-
-    merged = pd.merge_asof(
-        df_s.sort_values('fecha'),
-        df_d.sort_values('fecha'),
-        on='fecha',
-        tolerance=pd.Timedelta('7d')
-    ).set_index('fecha')
-
-    merged = merged.dropna()
-    merged['dias'] = merged['stock'] / merged['supply']
-    return merged[['dias']]
+    unidas = pd.concat({"stock": stock, "supply": supply}, axis=1, sort=True)
+    unidas.index.name = "fecha"
+    unidas["dias"] = unidas["stock"] / unidas["supply"].where(unidas["supply"] > 0)
+    return unidas[["dias"]]
 
 
 # El origen único del metadato. Esta clase se exporta.
@@ -929,3 +927,138 @@ def transform_hdd(series_ciudades: list) -> pd.DataFrame:
     df["dia_temporada"] = [_dia_desde_1_octubre(f) for f in df.index]
     df["hdd_acumulado"] = df.groupby("temporada")["hdd"].cumsum()
     return df
+
+# ── Panel diésel EE. UU. → Europa ─────────────────────────────────────────────
+
+SERIE_TOTAL_EXPORTS_MENSUAL = "MDIEXUS1"  # total de EE. UU.: referencia, nunca un destino
+
+
+def _mes_desde_texto(valores):
+    """`YYYY-MM` → Timestamp del día 1 de ese mes. Lanza si el formato no es mes."""
+    return pd.to_datetime(valores, format="%Y-%m")
+
+
+def ultimo_mes_publicado(df, serie=SERIE_TOTAL_EXPORTS_MENSUAL):
+    """Último mes (Timestamp, día 1) con valor de `serie` en la descarga de `expc`.
+
+    Fija el límite de la regla «mes sin fila = 0»: solo hasta este mes. Devuelve
+    None si no hay ninguna fila con valor (entonces no hay rango publicado).
+    """
+    if df is None or df.empty:
+        return None
+    fila = df[df["series"] == serie]
+    valores = pd.to_numeric(fila["value"], errors="coerce")
+    fila = fila[valores.notna()]
+    if fila.empty:
+        return None
+    return _mes_desde_texto(fila["period"]).max()
+
+
+def transform_exports_destino(df, ultimo_mes, perimetro):
+    """Exportaciones mensuales de destilado de EE. UU. por perímetro de destinos.
+
+    `df`: descarga cruda de `expc` (columnas `series`, `period`, `value`).
+    `perimetro`: {nombre: iterable de IDs de serie}; cada columna del resultado es
+    la suma de las series de su perímetro. `MDIEXUS1` no puede estar en ninguno.
+
+    Regla de vacío: un mes SIN fila dentro del rango publicado (primer mes de la
+    descarga .. `ultimo_mes`) cuenta como 0 (sin envíos, validado en la Fase 0).
+    Después de `ultimo_mes` no hay dato: esos meses no aparecen. Una fila presente
+    con valor nulo NO es 0: el perímetro que la contiene queda en NaN ese mes.
+    """
+    columnas = list(perimetro)
+    vacio = pd.DataFrame(columns=columnas, dtype=float)
+    vacio.index = pd.DatetimeIndex([], name="mes")
+
+    ids = {s for v in perimetro.values() for s in v}
+    if SERIE_TOTAL_EXPORTS_MENSUAL in ids:
+        raise ValueError("MDIEXUS1 es el total de EE. UU., no un destino: no puede sumarse")
+    if df is None or df.empty or ultimo_mes is None:
+        return vacio
+
+    ultimo = pd.Timestamp(ultimo_mes)
+    d = df[df["series"].isin(ids)][["series", "period", "value"]].copy()
+    d["mes"] = _mes_desde_texto(d["period"])
+    if d.duplicated(subset=["series", "mes"]).any():
+        raise ValueError("Clave (serie, mes) repetida en la descarga")
+    d["value"] = pd.to_numeric(d["value"], errors="coerce")
+
+    inicio = _mes_desde_texto(df["period"]).min()
+    if ultimo < inicio:
+        return vacio
+    meses = pd.date_range(inicio, ultimo, freq="MS")
+    d = d[d["mes"] <= ultimo]
+
+    ids = sorted(ids)
+    valores = d.pivot(index="mes", columns="series", values="value").reindex(index=meses, columns=ids)
+    hay_fila = (d.assign(x=True).pivot(index="mes", columns="series", values="x")
+                .reindex(index=meses, columns=ids).fillna(False).astype(bool))
+    # Ausente (sin fila) → 0; presente con valor nulo → sigue siendo NaN.
+    matriz = valores.where(hay_fila, 0.0)
+
+    out = pd.DataFrame({nombre: matriz[list(series)].sum(axis=1, skipna=False)
+                        for nombre, series in perimetro.items()}, index=meses)
+    out.index.name = "mes"
+    return out
+
+
+def transform_cuota_us(df_eurostat, partner_us="US", partner_total="TOTAL"):
+    """Cuota de EE. UU. en las importaciones de un producto, en %, por mes y GEO.
+
+    `df_eurostat`: salida cruda de `eurostat.get_data_df('nrg_ti_oilm', ...)`: una
+    fila por (partner, geo) y una columna por mes `YYYY-MM`. Los vacíos llegan
+    mezclados como NaN y None: se pasan por `pd.to_numeric` antes de calcular.
+
+    Si falta el numerador o el denominador (o el total es ≤ 0), la cuota es NaN:
+    ni 0 % ni 100 %. Un US = 0 explícito sí es 0 %.
+    """
+    vacio = pd.DataFrame(dtype=float)
+    vacio.index = pd.DatetimeIndex([], name="mes")
+    if df_eurostat is None or df_eurostat.empty:
+        return vacio
+
+    col_geo = next((c for c in df_eurostat.columns if str(c).startswith("geo")), None)
+    if col_geo is None or "partner" not in df_eurostat.columns:
+        raise ValueError("Faltan las columnas geo/partner en la descarga de Eurostat")
+    for col in ("siec", "unit"):
+        if col in df_eurostat.columns and df_eurostat[col].nunique() > 1:
+            raise ValueError(f"La cuota mezclaría varios valores de `{col}`")
+    meses = [c for c in df_eurostat.columns if re.fullmatch(r"\d{4}-\d{2}", str(c))]
+    if not meses:
+        return vacio
+
+    largo = df_eurostat.melt(id_vars=[col_geo, "partner"], value_vars=meses,
+                             var_name="mes", value_name="valor")
+    largo["valor"] = pd.to_numeric(largo["valor"], errors="coerce")
+    largo["mes"] = _mes_desde_texto(largo["mes"])
+    if largo.duplicated(subset=[col_geo, "partner", "mes"]).any():
+        raise ValueError("Clave (geo, partner, mes) repetida en la descarga")
+
+    def _ancho(partner):
+        x = largo[largo["partner"] == partner]
+        return x.pivot(index="mes", columns=col_geo, values="valor")
+
+    num, den = _ancho(partner_us), _ancho(partner_total)
+    indice = pd.DatetimeIndex(sorted(set(largo["mes"])), name="mes")
+    geos = sorted(set(largo[col_geo]))
+    num = num.reindex(index=indice, columns=geos)
+    den = den.reindex(index=indice, columns=geos)
+    cuota = num / den.where(den > 0) * 100
+    cuota.columns.name = None
+    return cuota
+
+
+def media_movil_4_semanas(serie):
+    """Media de 4 semanas (D5): `rolling(4, min_periods=4)` sobre una rejilla semanal continua.
+
+    Las semanas ausentes dejan NaN en toda ventana que las contenga y las 3
+    primeras semanas son NaN: sin efecto de borde disimulado. Las fechas deben
+    caer en una rejilla de 7 días; si no, lanza `ValueError`.
+    """
+    if serie.empty:
+        return serie.copy()
+    serie = serie.sort_index()
+    rejilla = pd.date_range(serie.index.min(), serie.index.max(), freq="7D")
+    if not serie.index.isin(rejilla).all():
+        raise ValueError("Las fechas no caen en una rejilla semanal de 7 días")
+    return serie.reindex(rejilla).rolling(4, min_periods=4).mean().rename_axis(serie.index.name)
