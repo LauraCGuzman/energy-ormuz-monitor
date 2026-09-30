@@ -217,7 +217,7 @@ def panel_brent() -> None:
         "son stock de trabajo en refinerías, terminales y oleoductos. Los dos suelos son referencias analíticas propias, no cifras oficiales: "
         f"{SUELO_TECNICO_SPR/1000:.0f}M bbl (extracción de la SPR ya degradada) y {SUELO_OPERATIVO_COMERCIAL/1000:.0f}M bbl (mínimo operativo comercial estimado: llenado de oleoductos y fondos de tanque). "
         "Brent: precio spot. El crudo conserva holgura sobre ambos suelos; la urgencia de suministro se mide en la cobertura de productos "
-        "(destilado y jet), no representada en este panel."
+        "(destilado y jet): ver el panel siguiente."
     )
 
 @st.fragment
@@ -405,7 +405,7 @@ def panel_entrada_gas_ue() -> None:
     st.subheader("¿Cuánto gas entra hoy en la UE, y por dónde? — gasoductos (ENTSOG) y GNL (GIE ALSI)")
     st.caption(
         "**Dato físico y diario, con un día de retraso.** Detecta un corte al día siguiente, pero el GNL "
-        "aparece como un solo bloque, sin país de origen: para saber de dónde viene, ver el panel siguiente.\n\n"
+        "aparece como un solo bloque, sin país de origen: para saber de dónde viene, ver el panel «¿A quién le compramos el gas?».\n\n"
         "Gas que entra en la UE cada día, en GWh/día, media de los últimos 7 días. Gasoductos desde "
         "fuera de la UE (ENTSOG) agrupados por el país de donde sale el gas, no por el país fronterizo: "
         "el gas que llega por Túnez o Marruecos cuenta como argelino. El gas que sale de la UE y vuelve "
@@ -633,7 +633,7 @@ def panel_origen_gas() -> None:
     st.caption(
         "**Dato comercial y mensual, con varios meses de retraso.** Reparte también el GNL por país de "
         "origen (por ejemplo, Estados Unidos) e incluye las compras entre países de la UE. Para ver un "
-        "corte en cuanto ocurre, ver el panel anterior."
+        "corte en cuanto ocurre, ver el panel «¿Cuánto gas entra hoy en la UE, y por dónde?»."
     )
 
     # 1. Extracción (dataset completo + diccionario de partners — cacheado)
@@ -670,6 +670,25 @@ def panel_origen_gas() -> None:
 
     ultima_fecha = pivot.index.max().strftime("%B %Y")
     st.caption(f"Última actualización de datos: {ultima_fecha} · Fuente: Eurostat (nrg_ti_gasm)")
+
+
+def _cobertura_destilado_us(API_KEY) -> None:
+    """Gráfico 2: días de cobertura de destilado en EE. UU. (existencias / product supplied)."""
+    st.markdown("#### Días de cobertura de destilado en EE. UU.")
+    dias = transform_cobertura_us(
+        fetch_destilado_stocks(API_KEY), fetch_destilado_supplied(API_KEY))["dias"]
+    if dias.dropna().empty:
+        st.warning("No hay datos para calcular los días de cobertura.")
+        return
+    st.plotly_chart(plot_cobertura_us(dias), width='stretch')
+    st.caption(
+        "Días de cobertura = existencias comerciales de destilado (WDISTUS1, miles de barriles) ÷ "
+        "media de 4 semanas del product supplied de destilado (WDIUPUS2, miles de barriles/día): el "
+        "mismo cálculo que la EIA aplica a sus «days of supply». No hay dato en las tres primeras "
+        "semanas; una semana ausente en cualquiera de las series deja en blanco las semanas cuya "
+        "ventana la incluye, y una media ≤ 0 también. "
+        f"Datos hasta {dias.dropna().index.max():%d-%m-%Y}."
+    )
 
 
 def panel_nivel_producto_us() -> None:
@@ -768,8 +787,15 @@ def panel_nivel_producto_us() -> None:
         "son referencias analíticas propias basadas en los límites operativos mínimos históricos "
         "(*tank bottoms* y *line fill* estructural) por debajo de los cuales aparecen disrupciones "
         "severas en la distribución capilar. A diferencia del crudo, estas series reflejan la "
-        "urgencia real de suministro a corto plazo tras el cierre de Ormuz."
+        "urgencia real de suministro a corto plazo."
     )
+
+    # 5. Días de cobertura de destilado, debajo de las existencias (bloque independiente)
+    try:
+        _cobertura_destilado_us(API_KEY)
+    except Exception as e:  # noqa: BLE001 - un fallo de red/formato no debe tumbar el panel
+        logging.warning("Panel existencias, bloque «días de cobertura»: %s: %s", type(e).__name__, e)
+        st.warning(f"No se pudo mostrar «días de cobertura»: fallo al obtener o procesar los datos ({type(e).__name__}).")
 
 NOMBRES_DESTINO_EXPORTS = {"UE27": "UE-27", "ES": "España", "GBR": "Reino Unido", "NOR": "Noruega"}
 NOMBRES_GEO_CUOTA = {"EU27_2020": "UE-27", "ES": "España"}
@@ -788,25 +814,6 @@ def _diesel_exports_semanales(API_KEY) -> None:
         "±8 % mes a mes. La media de 4 semanas es un cálculo propio (estimación): no se dibuja en "
         "las tres primeras semanas ni en las ventanas con una semana ausente. "
         f"Datos hasta {bruta.index.max():%d-%m-%Y}."
-    )
-
-
-def _diesel_cobertura(API_KEY) -> None:
-    """Gráfico 2: días de cobertura de destilado en EE. UU. (existencias / product supplied)."""
-    st.markdown("#### Días de cobertura de destilado en EE. UU.")
-    dias = transform_cobertura_us(
-        fetch_destilado_stocks(API_KEY), fetch_destilado_supplied(API_KEY))["dias"]
-    if dias.dropna().empty:
-        st.warning("No hay datos para calcular los días de cobertura.")
-        return
-    st.plotly_chart(plot_cobertura_us(dias), width='stretch')
-    st.caption(
-        "Días de cobertura = existencias comerciales de destilado (WDISTUS1, miles de barriles) ÷ "
-        "media de 4 semanas del product supplied de destilado (WDIUPUS2, miles de barriles/día): el "
-        "mismo cálculo que la EIA aplica a sus «days of supply». No hay dato en las tres primeras "
-        "semanas; una semana ausente en cualquiera de las series deja en blanco las semanas cuya "
-        "ventana la incluye, y una media ≤ 0 también. "
-        f"Datos hasta {dias.dropna().index.max():%d-%m-%Y}."
     )
 
 
@@ -850,14 +857,13 @@ def _diesel_cuota(_API_KEY=None) -> None:
 
 
 def panel_diesel_us_europa() -> None:
-    """Panel: diésel de EE. UU. hacia Europa — exportaciones, cobertura y peso en las importaciones."""
-    st.subheader("Diésel de EE. UU. hacia Europa: exportaciones, cobertura y cuota en las importaciones")
+    """Panel: diésel de EE. UU. hacia Europa — exportaciones y peso en las importaciones."""
+    st.subheader("Diésel de EE. UU. hacia Europa: exportaciones y cuota en las importaciones")
     API_KEY = st.secrets['EIA_API_KEY']
 
     # Cada bloque es independiente: si uno falla, los demás se siguen dibujando.
     for nombre, bloque in (
         ("exportaciones semanales", _diesel_exports_semanales),
-        ("días de cobertura", _diesel_cobertura),
         ("exportaciones por destino", _diesel_exports_destino),
         ("cuota de EE. UU. en las importaciones", _diesel_cuota),
     ):
@@ -881,29 +887,33 @@ def main() -> None:
     # --- PASO 1: El estrecho de Ormuz ---
     panel_portwatch()
 
-    # --- PASO 2: Brent+ reservas petróleo de EEUU ---
+    st.header("Petróleo")
+
+    # --- PASO 2: Brent + reservas petróleo de EEUU ---
     panel_brent()
 
-    # --- PASO 3: Reservas de gas EU ---
-    panel_reservas_eu_gas()
-
-    # --- PASO 4: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
-    panel_entrada_gas_ue()
-
-    # --- PASO 5: Origen del gas importado (Eurostat nrg_ti_gasm) — junto al anterior (pliego «robustez», Fase 3)
-    panel_origen_gas()
-
-    # --- PASO 6: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
-    panel_llegada_gas()
-
-    # --- PASO 7: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
-    panel_reservas_emergencia()
-
-    # --- PASO 8: Nivel de existencias de producto en EEUU (EIA semanal) ---
+    # --- PASO 3: Nivel de existencias de producto en EEUU (EIA semanal) y días de cobertura ---
     panel_nivel_producto_us()
 
-    # --- PASO 9: Diésel de EE. UU. hacia Europa (EIA + Eurostat nrg_ti_oilm) ---
+    # --- PASO 4: Diésel de EE. UU. hacia Europa (EIA + Eurostat nrg_ti_oilm) ---
     panel_diesel_us_europa()
+
+    # --- PASO 5: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
+    panel_reservas_emergencia()
+
+    st.header("Gas")
+
+    # --- PASO 6: Reservas de gas EU ---
+    panel_reservas_eu_gas()
+
+    # --- PASO 7: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
+    panel_entrada_gas_ue()
+
+    # --- PASO 8: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
+    panel_llegada_gas()
+
+    # --- PASO 9: Origen del gas importado (Eurostat nrg_ti_gasm) ---
+    panel_origen_gas()
 
     # --- PASO 10: Metodología
     with st.expander("📋 Metodología y limitaciones"):
