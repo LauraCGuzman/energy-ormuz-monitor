@@ -2,7 +2,7 @@
 
 Dashboard de seguridad energética europea en el contexto del conflicto del Estrecho de Ormuz (inicio 28-feb-2026).
 
-Documenta en tiempo real cómo evoluciona la situación energética europea usando datos públicos y verificables: flujos marítimos por los principales chokepoints (IMF PortWatch), precio del crudo, reservas de crudo, existencias de productos y exportaciones de diésel de EEUU (EIA), reservas de gas subterráneo (GIE AGSI+), entrada de gas a la UE por gasoducto (ENTSOG), llegada de GNL a las terminales de regasificación (GIE ALSI), grados-día de calefacción (Open-Meteo) y reservas de emergencia, origen del gas e importaciones de gasóleo por país (Eurostat).
+Documenta en tiempo real cómo evoluciona la situación energética europea usando datos públicos y verificables: flujos marítimos por los principales chokepoints (IMF PortWatch), precio del crudo, reservas de crudo, existencias de productos y exportaciones de diésel de EEUU (EIA), reservas de gas subterráneo (GIE AGSI+), entrada de gas a la UE por gasoducto (ENTSOG), llegada de GNL a las terminales de regasificación (GIE ALSI), grados-día de calefacción (Open-Meteo) y reservas de emergencia (en días y por producto), origen del gas e importaciones de gasóleo por país (Eurostat).
 
 No es geopolítica especulativa. Es análisis de datos físicos que se actualizan solos.
 

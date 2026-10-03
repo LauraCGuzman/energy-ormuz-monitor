@@ -7,6 +7,7 @@ contexto del conflicto del Estrecho de Ormuz (inicio 28-feb-2026):
     - Precio Brent spot + reservas estratégicas EEUU (EIA)
     - Reservas de gas subterráneo Europa (GIE AGSI+)
     - Reservas de emergencia de petróleo en días por país (Eurostat)
+    - Reservas de emergencia por producto, en toneladas (Eurostat)
     - Origen del gas importado por país (Eurostat)
 
 Punto de entrada: `streamlit run app.py`
@@ -996,24 +997,24 @@ def main() -> None:
     # --- PASO 5: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
     panel_reservas_emergencia()
 
-    # --- PASO 5b: Reservas de emergencia por producto, en kt (Eurostat nrg_stk_oilm) ---
+    # --- PASO 6: Reservas de emergencia por producto, en kt (Eurostat nrg_stk_oilm) ---
     panel_stocks_producto()
 
     st.header("Gas")
 
-    # --- PASO 6: Reservas de gas EU ---
+    # --- PASO 7: Reservas de gas EU ---
     panel_reservas_eu_gas()
 
-    # --- PASO 7: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
+    # --- PASO 8: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
     panel_entrada_gas_ue()
 
-    # --- PASO 8: Origen del gas importado (Eurostat nrg_ti_gasm) — junto al anterior (pliego «robustez», Fase 3)
+    # --- PASO 9: Origen del gas importado (Eurostat nrg_ti_gasm) — junto al anterior (pliego «robustez», Fase 3)
     panel_origen_gas()
 
-    # --- PASO 9: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
+    # --- PASO 10: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
     panel_llegada_gas()
 
-    # --- PASO 10: Metodología
+    # --- PASO 11: Metodología
     with st.expander("📋 Metodología y limitaciones"):
         st.markdown("""
         **Fuentes y frecuencias**
