@@ -136,6 +136,61 @@ def plot_reservas_emergencia(
     return fig
 
 
+_COLORES_PRODUCTOS_STOCKS = {
+    'crudo': '#1D3557', 'gasolina': '#E63946', 'jet': '#457B9D',
+    'gasoleo': '#F4A261', 'fuel': '#6D6875',
+}
+
+
+def plot_stocks_producto(
+    niveles: pd.DataFrame,
+    variacion: pd.DataFrame,
+    nombres: dict,
+) -> "plotly.graph_objects.Figure":
+    """Reservas de emergencia por producto en dos filas con el eje X compartido.
+
+    Fila 1: nivel en kt, una línea por producto. Fila 2: variación mensual en barras
+    (negativo = salida de stock). Un NaN es un hueco real (`connectgaps=False`), nunca
+    0 ni interpolación. Sin título de figura ni líneas de eventos.
+
+    Args:
+        niveles: Fecha × producto (kt), salida de `niveles_stocks_producto`.
+        variacion: Fecha × producto (kt), salida de `variacion_mensual_stocks`.
+        nombres: dict {columna: nombre_legible}.
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12,
+        subplot_titles=[
+            "<b>¿Cuánto hay de cada producto?</b> — nivel de la reserva (kt)",
+            "<b>¿Qué se está sacando?</b> — variación mensual (kt; negativo = salida de stock)",
+        ],
+    )
+    for col in niveles.columns:
+        color = _COLORES_PRODUCTOS_STOCKS.get(col, "#888888")
+        nombre = nombres.get(col, col)
+        fig.add_trace(go.Scatter(
+            x=niveles.index, y=niveles[col], name=nombre, legendgroup=col,
+            mode="lines", line=dict(color=color, width=2.5), connectgaps=False,
+            hovertemplate="%{y:,.0f} kt<extra>" + nombre + "</extra>",
+        ), row=1, col=1)
+        fig.add_trace(go.Bar(
+            x=variacion.index, y=variacion[col], name=nombre, legendgroup=col,
+            showlegend=False, marker_color=color,
+            hovertemplate="%{y:+,.0f} kt<extra>" + nombre + "</extra>",
+        ), row=2, col=1)
+    fig.update_yaxes(title_text="kt", row=1, col=1)
+    fig.update_yaxes(title_text="kt / mes", row=2, col=1)
+    fig.update_layout(
+        barmode="relative", hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.08, x=0, xanchor="left"),
+        margin=dict(l=40, r=40, t=80, b=40),
+    )
+    return fig
+
+
 def plot_origen_gas(
     pivot: pd.DataFrame,
     geo_nombre: str,

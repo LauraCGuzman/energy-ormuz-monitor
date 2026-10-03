@@ -274,6 +274,157 @@ def transform_reservas_emergencia(df: "pd.DataFrame") -> "pd.DataFrame":
     return df_long
 
 
+# --- Reservas de emergencia por producto (Eurostat nrg_stk_oilm, miles de toneladas) ---
+# Variante bruta de cada `siec` (con biocomponente): la decisión de la Fase 0 del pliego.
+# «Otros» (O4690XO4694) queda fuera: no se reconstruye ni se obtiene por resta.
+PRODUCTOS_STOCKS = {
+    'crudo': 'O4100_TOT', 'gasolina': 'O4652', 'jet': 'O4661',
+    'gasoleo': 'O4671', 'fuel': 'O4680',
+}
+NOMBRES_PRODUCTOS_STOCKS = {
+    'crudo': 'Crudo', 'gasolina': 'Gasolina', 'jet': 'Queroseno/jet',
+    'gasoleo': 'Gasóleo', 'fuel': 'Fuelóleo',
+}
+_FLUJO_STOCKS_EMERGENCIA = 'STKCL_EUE'
+_UNIDAD_STOCKS = 'THS_T'
+
+
+def _miembros_con_hueco(piv: "pd.DataFrame") -> "pd.DataFrame":
+    """Máscara (mes × miembro) de los NaN con dato antes Y después del mes.
+
+    Un NaN sin ningún dato anterior (arranque) o sin ninguno posterior (retraso de
+    publicación), o una serie entera vacía, NO es hueco: es ausencia de dato o de stock.
+    """
+    visto = piv.notna().astype(int)
+    antes = visto.cummax().shift(1, fill_value=0).astype(bool)
+    despues = visto[::-1].cummax()[::-1].shift(-1, fill_value=0).astype(bool)
+    return piv.isna() & antes & despues
+
+
+def _largo_stocks(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Descarga cruda de nrg_stk_oilm → largo (geo, producto, Fecha, kt), una sola unidad y flujo."""
+    col_geo = [c for c in df.columns if 'geo' in str(c).lower()][0]
+    codigo_a_producto = {v: k for k, v in PRODUCTOS_STOCKS.items()}
+    d = df[(df['stk_flow'] == _FLUJO_STOCKS_EMERGENCIA) & (df['unit'] == _UNIDAD_STOCKS)
+           & (df['siec'].isin(codigo_a_producto))]
+    fechas = [c for c in d.columns if str(c)[:1].isdigit()]
+    largo = d.melt(id_vars=[col_geo, 'siec'], value_vars=fechas,
+                   var_name='Fecha', value_name='kt')
+    largo = largo.rename(columns={col_geo: 'geo'})
+    largo['producto'] = largo['siec'].map(codigo_a_producto)
+    largo['Fecha'] = pd.to_datetime(largo['Fecha'], format='%Y-%m')
+    largo['kt'] = pd.to_numeric(largo['kt'], errors='coerce')
+    return largo[['geo', 'producto', 'Fecha', 'kt']]
+
+
+def _pivot_geo(g: "pd.DataFrame") -> "pd.DataFrame":
+    """Largo de un producto → Fecha × geo, ordenado y en rejilla mensual (meses sin fila = NaN)."""
+    piv = g.pivot_table(index='Fecha', columns='geo', values='kt', dropna=False, aggfunc='first')
+    return piv.reindex(pd.date_range(piv.index.min(), piv.index.max(), freq='MS')).rename_axis('Fecha')
+
+
+def transform_stocks_producto(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Niveles de reservas de emergencia por producto, en kt, para los 27 y el agregado UE-27.
+
+    Solo `STKCL_EUE` y `THS_T`. El agregado es el `EU27_2020` publicado por Eurostat,
+    nunca una suma de países. Regla de huecos: por producto, si algún miembro tiene
+    NaN en un mes con dato antes y después, ese mes del agregado pasa a NaN (se
+    enmascara el valor publicado; no se recalcula). Un miembro sin ningún dato del
+    producto (p. ej. Suecia sin fuelóleo) no anula meses.
+
+    Returns:
+        DataFrame largo con columnas geo, producto, Fecha, kt.
+    """
+    largo = _largo_stocks(df)
+    salida = []
+    for producto, g in largo.groupby('producto'):
+        piv = _pivot_geo(g)
+        miembros = [c for c in piv.columns if c in NOMBRES_PAISES_UE]
+        if 'EU27_2020' in piv.columns:
+            anulados = _miembros_con_hueco(piv[miembros]).any(axis=1)
+            piv.loc[anulados, 'EU27_2020'] = float('nan')
+        piv = piv[[c for c in piv.columns if c in NOMBRES_GEO]]
+        l = piv.reset_index().melt(id_vars='Fecha', var_name='geo', value_name='kt')
+        l['producto'] = producto
+        salida.append(l)
+    if not salida:
+        return pd.DataFrame(columns=['geo', 'producto', 'Fecha', 'kt'])
+    return pd.concat(salida, ignore_index=True)[['geo', 'producto', 'Fecha', 'kt']]
+
+
+def huecos_stocks_producto_ue(df: "pd.DataFrame") -> list:
+    """Tramos de meses del agregado UE-27 anulados por la regla de huecos.
+
+    Misma forma que `huecos_entrada_gas_ue`: lista de (mes_inicio, mes_fin, [países que
+    no reportaron]) en orden cronológico, con los meses consecutivos unidos. Se calcula
+    con la misma máscara que `transform_stocks_producto`, para que caption y gráfico
+    no puedan desincronizarse.
+    """
+    largo = _largo_stocks(df)
+    por_mes = {}
+    for _, g in largo.groupby('producto'):
+        piv = _pivot_geo(g)
+        miembros = [c for c in piv.columns if c in NOMBRES_PAISES_UE]
+        mascara = _miembros_con_hueco(piv[miembros])
+        for fecha, fila in mascara.iterrows():
+            for pais in fila.index[fila]:
+                por_mes.setdefault(fecha, set()).add(pais)
+    huecos = []
+    for fecha in sorted(por_mes):
+        paises = sorted(NOMBRES_PAISES_UE[p] for p in por_mes[fecha])
+        if huecos and huecos[-1][1] + pd.DateOffset(months=1) == fecha:
+            ini, _, prev = huecos[-1]
+            huecos[-1] = (ini, fecha, sorted(set(prev) | set(paises)))
+        else:
+            huecos.append((fecha, fecha, paises))
+    return huecos
+
+
+def formatear_huecos_stocks_producto_ue(huecos: list) -> str:
+    """`huecos_stocks_producto_ue` a texto, con el formato del caption de entrada de gas:
+    `"dic 2025: Suecia; feb – mar 2026: Francia, Italia"` (tramos separados por «; »)."""
+    def _rango(ini, fin):
+        if ini == fin:
+            return formatear_mes_corto(ini)
+        if ini.year == fin.year:
+            return f"{_MESES_ABREV_ES[ini.month]} – {formatear_mes_corto(fin)}"
+        return f"{formatear_mes_corto(ini)} – {formatear_mes_corto(fin)}"
+
+    return "; ".join(f"{_rango(i, f)}: {', '.join(p)}" for i, f, p in huecos)
+
+
+def formatear_mes_corto(fecha: "pd.Timestamp") -> str:
+    """`jun 2026`: mes en español independiente del locale del servidor."""
+    return f"{_MESES_ABREV_ES[fecha.month]} {fecha.year}"
+
+
+def niveles_stocks_producto(largo: "pd.DataFrame", geo: str) -> "pd.DataFrame":
+    """Niveles (Fecha × producto, kt) de un geo, sin los meses vacíos de los extremos.
+
+    Los meses enteros vacíos del principio y del final (publicación pendiente) se
+    quitan; un mes vacío en medio se conserva como NaN para que la línea muestre el hueco.
+    """
+    d = largo[largo['geo'] == geo]
+    w = d.pivot_table(index='Fecha', columns='producto', values='kt', dropna=False, aggfunc='first')
+    w = w.reindex(columns=[p for p in PRODUCTOS_STOCKS if p in w.columns]).sort_index()
+    validos = w.dropna(how='all').index
+    if len(validos) == 0:
+        return w.iloc[0:0]
+    return w.loc[validos.min():validos.max()]
+
+
+def variacion_mensual_stocks(niveles: "pd.DataFrame") -> "pd.DataFrame":
+    """Variación mensual por producto: `diff()` sobre el índice ordenado y en rejilla mensual.
+
+    Un mes que falta (sin fila o con NaN) deja NaN en él y en el siguiente: nunca 0.
+    """
+    if niveles.empty:
+        return niveles.copy()
+    n = niveles.sort_index()
+    rejilla = pd.date_range(n.index.min(), n.index.max(), freq='MS')
+    return n.reindex(rejilla).diff().rename_axis(n.index.name)
+
+
 def transform_origen_gas(df_gas: "pd.DataFrame", geo: str) -> "pd.DataFrame | None":
     """Prepara el pivot de origen de gas para un país o el agregado UE.
 

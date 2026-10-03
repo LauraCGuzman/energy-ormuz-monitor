@@ -47,12 +47,16 @@ from data.transform import (
     calcular_autonomias_spr, EstadoSPR, CIUDADES_HDD,
     transform_cobertura_us, transform_exports_destino, transform_cuota_us,
     ultimo_mes_publicado, media_movil_4_semanas,
+    transform_stocks_producto, huecos_stocks_producto_ue, formatear_huecos_stocks_producto_ue,
+    niveles_stocks_producto, variacion_mensual_stocks, NOMBRES_PRODUCTOS_STOCKS,
+    formatear_mes_corto,
 )
 from data.eurostat_client import (
     fetch_reservas_emergencia, fetch_origen_gas, fetch_importaciones_gasoleo_us_total,
+    fetch_stocks_producto,
 )
 from utils.charts import (
-    plot_reservas_emergencia, plot_origen_gas, plot_lng_utilization, plot_hdd_pais,
+    plot_reservas_emergencia, plot_stocks_producto, plot_origen_gas, plot_lng_utilization, plot_hdd_pais,
     plot_entrada_gas_ue, resaltar_serie_mas_reciente,
     plot_exports_semanales, plot_cobertura_us, plot_exports_destino, plot_cuota_us,
 )
@@ -635,6 +639,56 @@ def panel_reservas_emergencia() -> None:
     )
 
 @st.fragment
+def panel_stocks_producto() -> None:
+    """Panel interactivo: reservas de emergencia por producto, en kt (Eurostat nrg_stk_oilm).
+
+    Selector propio (no comparte el del panel de días, que no tiene UE-27 y vive en su
+    propio fragmento), con UE-27 por defecto.
+    """
+    st.subheader("¿Qué producto sale de las reservas de emergencia? — por producto, en toneladas (Eurostat)")
+
+    # 1. Extracción y transformación (los huecos del agregado salen de la misma descarga)
+    df_crudo = fetch_stocks_producto()
+    largo = transform_stocks_producto(df_crudo)
+    huecos = huecos_stocks_producto_ue(df_crudo)
+
+    # 2. Desplegable: UE-27 primero (por defecto), luego países alfabético
+    codigos_paises = sorted(
+        [c for c in NOMBRES_GEO if c != 'EU27_2020' and c in set(largo['geo'])],
+        key=lambda c: NOMBRES_GEO[c]
+    )
+    opciones = [(NOMBRES_GEO['EU27_2020'], 'EU27_2020')] + [(NOMBRES_GEO[c], c) for c in codigos_paises]
+    nombres_display = [nombre for nombre, _ in opciones]
+    codigos = [cod for _, cod in opciones]
+    seleccion = st.selectbox("País:", nombres_display, index=0, key="sel_stocks_producto")
+    geo = codigos[nombres_display.index(seleccion)]
+
+    # 3. Series del país seleccionado
+    niveles = niveles_stocks_producto(largo, geo)
+    if niveles.empty:
+        st.warning(f"No hay datos para {seleccion}.")
+        return
+    variacion = variacion_mensual_stocks(niveles)
+
+    # 4. Renderizado
+    st.plotly_chart(plot_stocks_producto(niveles, variacion, NOMBRES_PRODUCTOS_STOCKS), width='stretch')
+    ultima_fecha = formatear_mes_corto(niveles.index.max())
+    texto_caption = (
+        "Reservas de emergencia de petróleo por producto, en miles de toneladas (Directiva 2009/119/CE). "
+        "Complementa el panel de días: los días miden el colchón frente al mínimo legal; este muestra qué "
+        "producto entra o sale. Las toneladas sí se suman entre países, los días no. Los productos no suman "
+        "el total de las reservas (quedan fuera semiproductos y otros). Eurostat publica con 2–3 meses de "
+        f"retraso. _Fuente: Eurostat (nrg_stk_oilm). Dato a {ultima_fecha}._"
+    )
+    if geo == 'EU27_2020' and huecos:
+        texto_caption += (
+            "\n\nMeses en blanco en la UE-27 por dato incompleto de algún país: "
+            f"{formatear_huecos_stocks_producto_ue(huecos)}."
+        )
+    st.caption(texto_caption)
+
+
+@st.fragment
 def panel_origen_gas() -> None:
     """Panel interactivo: origen del gas importado por país o agregado UE-27."""
     st.subheader("¿A quién le compramos el gas? — proveedores por país (Eurostat)")
@@ -942,6 +996,9 @@ def main() -> None:
     # --- PASO 5: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
     panel_reservas_emergencia()
 
+    # --- PASO 5b: Reservas de emergencia por producto, en kt (Eurostat nrg_stk_oilm) ---
+    panel_stocks_producto()
+
     st.header("Gas")
 
     # --- PASO 6: Reservas de gas EU ---
@@ -969,7 +1026,7 @@ def main() -> None:
         | EIA | Exportaciones de destilado de EE. UU. por país de destino | Mensual |
         | GIE AGSI+ | Reservas de gas subterráneo | Diaria |
         | ENTSOG | Entrada de gas por gasoducto (flujo físico y nominación) | Diaria |
-        | Eurostat | Reservas de emergencia y origen del gas | Mensual |
+        | Eurostat | Reservas de emergencia (días y, por producto, miles de toneladas: nrg_stk_oem, nrg_stk_oilm) y origen del gas | Mensual |
         | Eurostat | Importaciones de gasóleo por origen (nrg_ti_oilm) | Mensual |
 
         **Desfases de publicación**
