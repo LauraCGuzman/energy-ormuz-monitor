@@ -5,6 +5,7 @@ Usa la librería `eurostat` que accede a la SDMX REST API de Eurostat.
 
 Datasets utilizados:
     - nrg_stk_oem  : reservas de emergencia de petróleo en días de autonomía (NR)
+    - nrg_stk_oilm : reservas de emergencia de petróleo por producto (THS_T)
     - nrg_ti_gasm  : origen del gas natural importado por país (TJ_GCV)
     - nrg_ti_oilm  : importaciones mensuales de gasóleo (O4671) por origen (THS_T)
 """
@@ -24,6 +25,23 @@ def fetch_reservas_emergencia() -> pd.DataFrame:
     """
     return eurostat.get_data_df('nrg_stk_oem',
         filter_pars={'startPeriod': '2022', 'stk_flow': ['STK_EUE_DIR'], 'unit': ['NR']})
+
+
+@st.cache_data(ttl=3600)
+def fetch_stocks_producto() -> pd.DataFrame:
+    """Descarga nrg_stk_oilm: reservas de emergencia (STKCL_EUE) por producto, en bruto.
+
+    Crudo, gasolina, jet, gasóleo y fuelóleo (variante bruta de cada `siec`), miles de
+    toneladas (THS_T), desde 2022-01. Todos los geo: los 27 miembros hacen falta para
+    detectar los huecos que anulan un mes del agregado `EU27_2020`.
+
+    Returns:
+        DataFrame crudo de la librería eurostat: columnas freq, stk_flow, siec, unit,
+        geo\\TIME_PERIOD y una columna por mes (YYYY-MM).
+    """
+    return eurostat.get_data_df('nrg_stk_oilm', filter_pars={
+        'startPeriod': '2022-01', 'stk_flow': ['STKCL_EUE'], 'unit': ['THS_T'],
+        'siec': ['O4100_TOT', 'O4652', 'O4661', 'O4671', 'O4680']})
 
 
 @st.cache_data(ttl=3600)
