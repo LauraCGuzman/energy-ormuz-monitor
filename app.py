@@ -629,7 +629,7 @@ def panel_reservas_emergencia() -> None:
     fig = plot_reservas_emergencia(df_long, pais_cod, NOMBRES_PAISES_UE)
     st.plotly_chart(fig, width='stretch')
 
-    ultima_fecha = df_long['Fecha'].max().strftime("%B %Y")
+    ultima_fecha = formatear_mes_corto(df_long['Fecha'].max())
     st.caption(f"Última actualización de datos: {ultima_fecha} · Fuente: Eurostat (nrg_stk_oem)")
     st.info(
         "**Nota:** Autonomía del stock de emergencia de crudo y productos petrolíferos (Directiva 2009/119/CE). "
@@ -731,7 +731,7 @@ def panel_origen_gas() -> None:
     fig = plot_origen_gas(pivot, geo_nombre, dic_partner)
     st.plotly_chart(fig, width='stretch')
 
-    ultima_fecha = pivot.index.max().strftime("%B %Y")
+    ultima_fecha = formatear_mes_corto(pivot.index.max())
     st.caption(f"Última actualización de datos: {ultima_fecha} · Fuente: Eurostat (nrg_ti_gasm)")
 
 
@@ -895,7 +895,7 @@ def _diesel_exports_destino(API_KEY) -> None:
         "Mes sin envíos registrados = 0 (verificado contra el total de EE. UU.). El destino es el "
         "primer puerto declarado: el diésel que llega a España vía terceros países no figura como "
         "España. España está incluida en la UE-27; Reino Unido y Noruega quedan fuera del agregado. "
-        f"Datos hasta {destinos.index.max():%m-%Y}; los últimos meses pueden ser provisionales."
+        f"Datos hasta {formatear_mes_corto(destinos.index.max())}; los últimos meses pueden ser provisionales."
     )
 
 
@@ -908,7 +908,7 @@ def _diesel_cuota(_API_KEY=None) -> None:
         return
     st.plotly_chart(plot_cuota_us(cuota, NOMBRES_GEO_CUOTA), width='stretch')
     ultimos = " · ".join(
-        f"{NOMBRES_GEO_CUOTA[c]} {cuota[c].dropna().index.max():%m-%Y}"
+        f"{NOMBRES_GEO_CUOTA[c]} {formatear_mes_corto(cuota[c].dropna().index.max())}"
         for c in cuota.columns if not cuota[c].dropna().empty
     )
     st.caption(
