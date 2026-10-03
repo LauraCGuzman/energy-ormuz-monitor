@@ -15,7 +15,7 @@ import pandas as pd
 
 from data.transform import (
     transform_stocks_producto, huecos_stocks_producto_ue, formatear_huecos_stocks_producto_ue,
-    niveles_stocks_producto, variacion_mensual_stocks,
+    niveles_stocks_producto, variacion_mensual_stocks, formatear_mes_corto,
 )
 
 MESES = ["2025-11", "2025-12", "2026-01", "2026-02"]
@@ -133,6 +133,12 @@ class TestAgregadoUE(unittest.TestCase):
         n = niveles_stocks_producto(transform_stocks_producto(df), "EU27_2020")
         self.assertEqual(n.index.tolist(), list(pd.to_datetime(["2025-11-01", "2025-12-01", "2026-01-01"])))
         self.assertTrue(np.isnan(n["gasoleo"].iloc[1]))
+
+
+class TestFormatoMes(unittest.TestCase):
+    def test_mes_corto_en_espanol_sin_depender_del_locale(self):
+        self.assertEqual(formatear_mes_corto(pd.Timestamp("2026-06-01")), "jun 2026")
+        self.assertEqual(formatear_mes_corto(pd.Timestamp("2025-12-15")), "dic 2025")
 
 
 if __name__ == "__main__":
