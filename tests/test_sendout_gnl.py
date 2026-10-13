@@ -1,9 +1,11 @@
 """Tests de la guarda del sendOut de GNL (pliego «fix-pico-gnl-alsi»).
 
-`data.transform.sendout_gnl_validado` va entre `fetch_lng` y `media_7d_atras`
-en el panel de entrada de gas a la UE. Origen: el 5/10/2026 la terminal de
-Ravenna publicó 100.000 GWh/d en ALSI+ y el GNL del panel saltó a ~18.000
-GWh/d durante una semana.
+`data.transform.sendout_gnl_validado` es la guarda; `transform_lng` es el
+único punto por el que la reciben los dos paneles que pintan el sendOut de
+ALSI+ («¿Cuánto gas entra hoy en la UE?» y «Llegada de GNL a Europa»,
+pliego «fix-guarda-gnl-llegada»). Origen: el 5/10/2026 la terminal de
+Ravenna publicó 100.000 GWh/d en ALSI+ y el GNL del panel de entrada saltó
+a ~18.000 GWh/d durante una semana.
 """
 
 import unittest
@@ -15,8 +17,11 @@ from data.transform import (
     formatear_dias_excluidos_gnl,
     media_7d_atras,
     sendout_gnl_validado,
+    texto_aviso_gnl_excluidos,
+    transform_lng,
     triaje_sendout_gnl,
 )
+from utils.charts import plot_lng_utilization
 
 
 def _df_alsi(n=60, sendout=3600.0, dtrs=8000.0, inicio="2026-08-10"):
@@ -86,6 +91,57 @@ class TestIndice(unittest.TestCase):
         # Día 7 cronológico: media de 100..700 = 400 (con el índice al revés saldría otra cosa).
         self.assertEqual(media.iloc[6], 400.0)
         self.assertEqual(media.iloc[-1], 700.0)
+
+
+def _df_alsi_completo(n=60):
+    """Forma ALSI+ con las columnas que pinta `plot_lng_utilization`."""
+    df = _df_alsi(n=n)
+    df["inventory"] = 4500.0
+    df["dtmi"] = 9300.0
+    return df
+
+
+class TestTransformLng(unittest.TestCase):
+    """La guarda llega a los dos paneles por `transform_lng`."""
+
+    def test_dia_por_20_se_descarta_registra_y_no_llega_al_grafico(self):
+        df = _df_alsi_completo()
+        dia = df.index[50]
+        df.loc[dia, "sendOut"] = 3600.0 * 20
+
+        with self.assertLogs(level="WARNING") as log:
+            limpio, excluidos = transform_lng(df.iloc[::-1], pais="EU")
+
+        self.assertTrue(np.isnan(limpio.at[dia, "sendOut"]))
+        self.assertEqual(list(excluidos.index), [dia])
+        self.assertTrue(any(dia.strftime("%Y-%m-%d") in linea and "72000.0" in linea
+                            for linea in log.output))
+        # El resto de columnas no se toca.
+        self.assertEqual(limpio.at[dia, "inventory"], 4500.0)
+        # Panel «Llegada de GNL»: la traza de envío a la red no lleva el pico.
+        fig = plot_lng_utilization(limpio)
+        envio = next(t for t in fig.data if t.name == "Envío a la red")
+        self.assertEqual(np.nanmax(np.asarray(envio.y, dtype=float)), 3600.0)
+        # Panel de entrada: la media de 7 días sigue en el nivel normal.
+        self.assertEqual(media_7d_atras(limpio["sendOut"]).iloc[6:].max(), 3600.0)
+
+    def test_fecha_duplicada_falla_explicitamente(self):
+        df = _df_alsi_completo(n=10)
+        df = pd.concat([df, df.iloc[[3]]])
+        with self.assertRaisesRegex(ValueError, "repetida.*2026-08-13"):
+            transform_lng(df)
+
+    def test_indice_descendente_sale_ascendente(self):
+        df = _df_alsi_completo(n=10)
+        limpio, _ = transform_lng(df.iloc[::-1])
+        self.assertTrue(limpio.index.is_monotonic_increasing)
+
+    def test_aviso_comun(self):
+        excluidos = pd.Series([103636.8], index=pd.DatetimeIndex(["2026-10-05"]))
+        texto = texto_aviso_gnl_excluidos(excluidos)
+        self.assertTrue(texto.startswith("GNL: se descarta el send-out"))
+        self.assertTrue(texto.endswith("5 oct 2026 (103.637 GWh/d)."))
+        self.assertEqual(texto_aviso_gnl_excluidos(excluidos.iloc[0:0]), "")
 
 
 if __name__ == "__main__":

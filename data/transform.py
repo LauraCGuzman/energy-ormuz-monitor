@@ -792,13 +792,11 @@ def triaje_sendout_gnl(sendout: pd.Series, capacidad: pd.Series) -> pd.Series:
 
 
 def sendout_gnl_validado(df_lng: pd.DataFrame, pais: str = "EU") -> tuple[pd.Series, pd.Series]:
-    """sendOut diario de ALSI+ listo para `media_7d_atras`: ordenado,
-    validado y con los días sospechosos a NaN.
+    """sendOut diario de ALSI+ ordenado, validado y con los días sospechosos a NaN.
 
     Ordena el índice (GIE lo devuelve descendente), pasa el gate estructural
     y el triaje. Cada día excluido se registra en el log con fecha y valor.
-    `media_7d_atras` ya tolera hasta dos NaN en la ventana, así que un día
-    excluido no abre hueco en el gráfico: esa semana se promedia con 6 días.
+    Los paneles no la llaman directamente: pasan por `transform_lng`.
 
     Args:
         df_lng: salida de `fetch_lng` (o de `transform_gas` sobre ella), con
@@ -818,10 +816,44 @@ def sendout_gnl_validado(df_lng: pd.DataFrame, pais: str = "EU") -> tuple[pd.Ser
     excluidos = sendout[sospechoso]
     for fecha, valor in excluidos.items():
         logging.warning(
-            "%s: %s excluido de la media de 7 días - sendOut=%.1f GWh/d, dtrs=%.1f GWh/d",
+            "%s: %s descartado - sendOut=%.1f GWh/d, dtrs=%.1f GWh/d",
             contexto, fecha.strftime("%Y-%m-%d"), valor, df.at[fecha, "dtrs"],
         )
     return sendout.mask(sospechoso), excluidos
+
+
+def transform_lng(data: pd.DataFrame, pais: str = "EU") -> tuple[pd.DataFrame, pd.Series]:
+    """Punto único de entrada de los datos de ALSI+ (`fetch_lng`) a los paneles.
+
+    `transform_gas` (común con AGSI+) seguido de la guarda del sendOut
+    (`sendout_gnl_validado`). La usan los dos paneles que pintan el sendOut:
+    «¿Cuánto gas entra hoy en la UE?» (que le aplica la media de 7 días; un
+    día a NaN no abre hueco, `media_7d_atras` tolera hasta dos por ventana)
+    y «Llegada de GNL a Europa» (que lo pinta día a día; ahí el día
+    descartado sí se ve como un corte de un día en la línea).
+
+    Returns:
+        (salida de `transform_gas` con `sendOut` a NaN en los días
+         sospechosos, sendOut original de esos días — vacía si no hay ninguno).
+    """
+    df = transform_gas(data, pais=pais)
+    sendout, excluidos = sendout_gnl_validado(df, pais=pais)
+    df["sendOut"] = sendout
+    return df, excluidos
+
+
+def texto_aviso_gnl_excluidos(excluidos: pd.Series) -> str:
+    """Aviso de los paneles de GNL para los días descartados, o `""` si no hay ninguno.
+
+    Un solo texto para los dos paneles, para que digan exactamente lo mismo.
+    """
+    if excluidos.empty:
+        return ""
+    return (
+        "GNL: se descarta el send-out de los días con un valor anómalo publicado por la fuente "
+        "(por encima de la capacidad de regasificación declarada o del doble de lo habitual): "
+        f"{formatear_dias_excluidos_gnl(excluidos)}."
+    )
 
 
 def formatear_dias_excluidos_gnl(excluidos: pd.Series) -> str:
