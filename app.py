@@ -42,6 +42,7 @@ from data.transform import (
     transform_eia, transform_portwatch, transform_gas,
     transform_reservas_emergencia, transform_origen_gas, transform_hdd,
     transform_entrada_gas_ue, contar_dias_sospechosos, media_7d_atras,
+    sendout_gnl_validado, formatear_dias_excluidos_gnl,
     ultimo_dia_completo, huecos_entrada_gas_ue, formatear_huecos_entrada_gas_ue,
     NOMBRES_PAISES_UE, NOMBRES_GEO, NOMBRES_GEO_AGSI,
     NOMBRES_CHOKEPOINTS, CHOKEPOINT_DEFECTO, etiqueta_chokepoint,
@@ -448,12 +449,16 @@ def panel_entrada_gas_ue() -> None:
 
     # 3. Capa de GNL: sendOut de ALSI+ agregado UE, misma media de 7 días.
     #    `fetch_lng` ya arranca en 2022 por defecto — de sobra de
-    #    calentamiento para el 7d, no hace falta tocarlo.
+    #    calentamiento para el 7d, no hace falta tocarlo. Antes de la media,
+    #    la guarda de `sendout_gnl_validado`: índice único y ascendente, y
+    #    fuera de la media los días con un send-out imposible (pliego
+    #    «fix-pico-gnl-alsi»: Ravenna publicó 100.000 GWh/d el 5/10/2026).
     api_key = st.secrets["GIE_API_KEY"]
     client_gie = get_client(api_key=api_key)
     df_lng_bruto = fetch_lng(client_gie, "EU")
     df_lng = transform_gas(df_lng_bruto, pais="EU")
-    gnl_7d = media_7d_atras(df_lng["sendOut"].astype(float))
+    sendout_gnl, gnl_excluidos = sendout_gnl_validado(df_lng, pais="EU")
+    gnl_7d = media_7d_atras(sendout_gnl)
 
     df_combinado = df_gasoductos.copy()
     df_combinado["GNL"] = gnl_7d.reindex(df_combinado.index)
@@ -483,6 +488,15 @@ def panel_entrada_gas_ue() -> None:
                 f"{formatear_huecos_entrada_gas_ue(huecos)}."
             )
         st.caption(texto_caption)
+
+    # 4.1. Aviso de días de GNL fuera de la media, solo si caen en la ventana mostrada.
+    gnl_excluidos_visibles = gnl_excluidos.loc[fecha_inicio_visible.isoformat():]
+    if not gnl_excluidos_visibles.empty:
+        st.caption(
+            "GNL: fuera de la media de 7 días por un send-out anómalo publicado por la fuente "
+            "(por encima de la capacidad de regasificación declarada o del doble de lo habitual): "
+            f"{formatear_dias_excluidos_gnl(gnl_excluidos_visibles)}."
+        )
 
     # 5. Aviso de días sospechosos, solo si los hay en la ventana mostrada.
     n_sospechosos = contar_dias_sospechosos(

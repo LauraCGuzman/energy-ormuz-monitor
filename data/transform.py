@@ -729,6 +729,109 @@ def media_7d_atras(serie_o_df: "pd.Series | pd.DataFrame"):
     return serie_o_df.rolling(window=7, min_periods=5).mean()
 
 
+# ── Guarda del sendOut de GNL (ALSI+) antes de la media de 7 días ────────────
+#
+# Pliego «fix-pico-gnl-alsi». El 5/10/2026 la terminal de Ravenna publicó en
+# ALSI+ un sendOut de 100000.0 GWh/d (capacidad declarada: 146,7), con status
+# C; GIE lo arrastra al agregado de Italia y al de la UE (103.636,8 frente a
+# ~3.600 de los días de alrededor). Repartido por la media de 7 días, el GNL
+# del panel de entrada de gas saltó a ~18.000 GWh/d durante una semana.
+# Mismo patrón que `src/quality.py` del proyecto REE: dos preguntas distintas.
+#   1) ¿el índice es una serie diaria bien formada? -> `validar_indice_diario`
+#      (estructura: si no, error explícito, no se pinta nada).
+#   2) ¿el valor de cada día es plausible?          -> `triaje_sendout_gnl`
+#      (semántica: el día se marca, se registra y se excluye, no se detiene).
+# Comprobado con todo el histórico UE desde 2022: solo el 5/10/2026 cumple
+# alguna de las dos condiciones (el máximo legítimo es 1,35× la mediana de
+# los 30 días previos y 0,79× la capacidad declarada).
+
+FACTOR_MEDIANA_SENDOUT = 2.0
+VENTANA_MEDIANA_SENDOUT = 30
+# Con menos días previos que estos, la condición de la mediana no se evalúa
+# (arranque de la serie): ese día solo lo puede marcar la de capacidad.
+MIN_DIAS_MEDIANA_SENDOUT = 7
+
+
+def validar_indice_diario(indice: pd.Index, contexto: str) -> None:
+    """Gate estructural: índice sin fechas repetidas y en orden ascendente.
+
+    Lanza `ValueError` con las fechas repetidas si las hay. No ordena: el
+    llamador ordena antes y esto comprueba que lo hizo — una media móvil por
+    filas sobre un índice desordenado o con días duplicados promedia los
+    días equivocados sin avisar.
+    """
+    if not indice.is_unique:
+        repetidas = indice[indice.duplicated()].unique()
+        raise ValueError(
+            f"{contexto}: {len(repetidas)} fecha(s) repetida(s) en el índice - "
+            f"{_formatear_fechas(repetidas)}"
+        )
+    if not indice.is_monotonic_increasing:
+        raise ValueError(f"{contexto}: el índice no está en orden ascendente.")
+
+
+def triaje_sendout_gnl(sendout: pd.Series, capacidad: pd.Series) -> pd.Series:
+    """Días con un sendOut imposible: por encima de la capacidad de
+    regasificación declarada (`dtrs`) o de `FACTOR_MEDIANA_SENDOUT` veces la
+    mediana de los `VENTANA_MEDIANA_SENDOUT` días PREVIOS (el propio día no
+    entra en su mediana). Un `dtrs` ausente no marca nada.
+
+    Exige el índice ya ordenado (ver `validar_indice_diario`).
+
+    Returns:
+        Serie booleana con el índice de `sendout`, True en los días sospechosos.
+    """
+    mediana_previa = (
+        sendout.rolling(VENTANA_MEDIANA_SENDOUT, min_periods=MIN_DIAS_MEDIANA_SENDOUT)
+        .median()
+        .shift(1)
+    )
+    sobre_capacidad = sendout > capacidad.reindex(sendout.index)
+    sobre_mediana = sendout > FACTOR_MEDIANA_SENDOUT * mediana_previa
+    return (sobre_capacidad | sobre_mediana).fillna(False).astype(bool)
+
+
+def sendout_gnl_validado(df_lng: pd.DataFrame, pais: str = "EU") -> tuple[pd.Series, pd.Series]:
+    """sendOut diario de ALSI+ listo para `media_7d_atras`: ordenado,
+    validado y con los días sospechosos a NaN.
+
+    Ordena el índice (GIE lo devuelve descendente), pasa el gate estructural
+    y el triaje. Cada día excluido se registra en el log con fecha y valor.
+    `media_7d_atras` ya tolera hasta dos NaN en la ventana, así que un día
+    excluido no abre hueco en el gráfico: esa semana se promedia con 6 días.
+
+    Args:
+        df_lng: salida de `fetch_lng` (o de `transform_gas` sobre ella), con
+            columnas `sendOut` y `dtrs`.
+        pais: solo para los mensajes de error y de log.
+
+    Returns:
+        (sendOut en GWh/d con los días sospechosos a NaN,
+         sendOut original de esos días excluidos — vacía si no hay ninguno).
+    """
+    df = df_lng.sort_index()
+    contexto = f"[calidad_gnl/sendOut] {pais}"
+    validar_indice_diario(df.index, contexto)
+
+    sendout = df["sendOut"].astype(float)
+    sospechoso = triaje_sendout_gnl(sendout, df["dtrs"].astype(float))
+    excluidos = sendout[sospechoso]
+    for fecha, valor in excluidos.items():
+        logging.warning(
+            "%s: %s excluido de la media de 7 días - sendOut=%.1f GWh/d, dtrs=%.1f GWh/d",
+            contexto, fecha.strftime("%Y-%m-%d"), valor, df.at[fecha, "dtrs"],
+        )
+    return sendout.mask(sospechoso), excluidos
+
+
+def formatear_dias_excluidos_gnl(excluidos: pd.Series) -> str:
+    """Días excluidos a texto para el aviso del panel: `"5 oct 2026 (103.637 GWh/d)"`."""
+    return "; ".join(
+        f"{_formatear_rango_corto(fecha, fecha)} ({valor:,.0f} GWh/d)".replace(",", ".")
+        for fecha, valor in excluidos.items()
+    )
+
+
 def vaciar_dia_si_falta_algun_origen(df: pd.DataFrame) -> pd.DataFrame:
     """Si a un día le falta el dato de CUALQUIER origen (columna), ese día
     queda vacío para TODOS los orígenes — no solo el que falta.
