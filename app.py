@@ -982,6 +982,15 @@ def enlaces_contacto() -> None:
                 unsafe_allow_html=True)
 
 
+def _panel_aislado(panel) -> None:
+    """Dibuja un panel; si falla, avisa y deja que el resto de la página se siga dibujando."""
+    try:
+        panel()
+    except Exception as e:  # noqa: BLE001 - un fallo de red/formato no debe tumbar la página
+        logging.warning("Panel «%s»: %s: %s", panel.__name__, type(e).__name__, e)
+        st.warning(f"No se pudo mostrar este panel: fallo al obtener o procesar los datos ({type(e).__name__}).")
+
+
 def main() -> None:
     """Punto de entrada del dashboard."""
     st.title("Monitor Energético Europa/Ormuz")
@@ -994,38 +1003,38 @@ def main() -> None:
     "actualizados automáticamente desde el inicio del conflicto (28-feb-2026)."
     )
     # --- PASO 1: El estrecho de Ormuz ---
-    panel_portwatch()
+    _panel_aislado(panel_portwatch)
 
     st.header("Petróleo")
 
     # --- PASO 2: Brent + reservas petróleo de EEUU ---
-    panel_brent()
+    _panel_aislado(panel_brent)
 
     # --- PASO 3: Nivel de existencias de producto en EEUU (EIA semanal) y días de cobertura ---
-    panel_nivel_producto_us()
+    _panel_aislado(panel_nivel_producto_us)
 
     # --- PASO 4: Diésel de EE. UU. hacia Europa (EIA + Eurostat nrg_ti_oilm) ---
-    panel_diesel_us_europa()
+    _panel_aislado(panel_diesel_us_europa)
 
     # --- PASO 5: Reservas de emergencia en días (Eurostat nrg_stk_oem) ---
-    panel_reservas_emergencia()
+    _panel_aislado(panel_reservas_emergencia)
 
     # --- PASO 6: Reservas de emergencia por producto, en kt (Eurostat nrg_stk_oilm) ---
-    panel_stocks_producto()
+    _panel_aislado(panel_stocks_producto)
 
     st.header("Gas")
 
     # --- PASO 7: Reservas de gas EU ---
-    panel_reservas_eu_gas()
+    _panel_aislado(panel_reservas_eu_gas)
 
     # --- PASO 8: Entrada de gas a la UE por origen (ENTSOG + GIE ALSI) ---
-    panel_entrada_gas_ue()
+    _panel_aislado(panel_entrada_gas_ue)
 
     # --- PASO 9: Origen del gas importado (Eurostat nrg_ti_gasm) — junto al anterior (pliego «robustez», Fase 3)
-    panel_origen_gas()
+    _panel_aislado(panel_origen_gas)
 
     # --- PASO 10: Llegada de GNL a Europa — terminales de regasificación (GIE ALSI)
-    panel_llegada_gas()
+    _panel_aislado(panel_llegada_gas)
 
     # --- PASO 11: Metodología
     with st.expander("📋 Metodología y limitaciones"):
