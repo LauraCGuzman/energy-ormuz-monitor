@@ -8,7 +8,7 @@ Sin red: `requests.get` se sustituye por un simulacro.
 import unittest
 from unittest import mock
 
-from data import portwatch_client
+from data import peticiones, portwatch_client
 
 
 class TestPeticion(unittest.TestCase):
@@ -17,7 +17,7 @@ class TestPeticion(unittest.TestCase):
         respuesta.json.return_value = {"features": []}
         get = mock.Mock(return_value=respuesta)
         portwatch_client.fetch_chokepoint_flows.clear()
-        with mock.patch.object(portwatch_client.requests, "get", get):
+        with mock.patch.object(peticiones.requests, "get", get):
             portwatch_client.fetch_chokepoint_flows("chokepoint6", 2024)
         self.assertEqual(get.call_args.kwargs["timeout"], (10, 60))
 

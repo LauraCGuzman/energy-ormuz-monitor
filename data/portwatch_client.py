@@ -12,12 +12,12 @@ Limitaciones documentadas:
 
 from __future__ import annotations
 import pandas as pd
-import requests
 import streamlit as st
+
+from data.peticiones import http_get
 
 
 PORTWATCH_BASE_URL = "https://portwatch.imf.org"
-_TIMEOUT = (10, 60)  # (conexión, lectura) en segundos; sin él, un cuelgue de ArcGIS deja la página cargando
 
 @st.cache_data(ttl=21600)
 def fetch_chokepoint_flows(
@@ -73,7 +73,7 @@ def fetch_chokepoint_flows(
         # Actualizar el desplazamiento para la página actual
         params["resultOffset"] = offset
 
-        response = requests.get(url_base, params=params, timeout=_TIMEOUT).json()
+        response = http_get(url_base, params, etiqueta=f"PortWatch {chokepoint} offset={offset}").json()
 
         # Validación estricta por cada página obtenida
         if "error" in response:
