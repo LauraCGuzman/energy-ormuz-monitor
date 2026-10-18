@@ -32,7 +32,13 @@ def _eia_get(API_KEY, url_base, series_id, frecuencia, start):
         'sort[0][direction]': 'asc'
     }
     try:
-        respuesta = requests.get(url_base, params=parametros, timeout=_TIMEOUT)
+        try:
+            respuesta = requests.get(url_base, params=parametros, timeout=_TIMEOUT)
+        except (requests.Timeout, requests.ConnectionError):
+            # La EIA a veces deja una petición colgada y la siguiente responde en
+            # ~1 s: un único reintento evita que un cuelgue suelto tumbe el panel.
+            print(f"⚠️ EIA {series_id}: timeout o fallo de conexión, se reintenta una vez")
+            respuesta = requests.get(url_base, params=parametros, timeout=_TIMEOUT)
         if respuesta.status_code != 200:
             print(f"❌ Error EIA {series_id}. Status: {respuesta.status_code}")
             print(f"Detalle: {_redactar(respuesta.text[:300], API_KEY)}")

@@ -17,6 +17,7 @@ import streamlit as st
 
 
 PORTWATCH_BASE_URL = "https://portwatch.imf.org"
+_TIMEOUT = (10, 60)  # (conexión, lectura) en segundos; sin él, un cuelgue de ArcGIS deja la página cargando
 
 @st.cache_data(ttl=21600)
 def fetch_chokepoint_flows(
@@ -72,7 +73,7 @@ def fetch_chokepoint_flows(
         # Actualizar el desplazamiento para la página actual
         params["resultOffset"] = offset
 
-        response = requests.get(url_base, params=params).json()
+        response = requests.get(url_base, params=params, timeout=_TIMEOUT).json()
 
         # Validación estricta por cada página obtenida
         if "error" in response:

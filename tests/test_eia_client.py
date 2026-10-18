@@ -123,6 +123,33 @@ class TestPeticion(unittest.TestCase):
         self.assertEqual(params["api_key"], CLAVE)  # la clave sigue yendo a la EIA
         self.assertEqual(params["facets[series][]"], "WDISTUS1")
 
+    def test_timeout_suelto_se_reintenta_una_vez(self):
+        datos = [{"period": "2026-09-18", "series": "WDISTUS1", "value": "123.4"}]
+        get = mock.Mock(side_effect=[
+            requests.Timeout(f"Read timed out. url: {URL_CON_CLAVE}"),
+            _respuesta(200, json_data={"response": {"total": "1", "data": datos}}),
+        ])
+        salida = io.StringIO()
+        with mock.patch.object(eia_client.requests, "get", get), \
+                contextlib.redirect_stdout(salida):
+            df = _eia_get(CLAVE, URL, "WDISTUS1", "weekly", "2023-01-01")
+        self.assertEqual(get.call_count, 2)
+        pd.testing.assert_frame_equal(df, pd.DataFrame(datos))
+        self.assertNotIn(CLAVE, salida.getvalue())
+
+    def test_dos_timeouts_seguidos_lanzan_sin_clave(self):
+        get = mock.Mock(side_effect=requests.Timeout(f"Read timed out. url: {URL_CON_CLAVE}"))
+        e, traza, salida = _llamar_y_capturar(get)
+        self.assertEqual(get.call_count, 2)
+        self.assertIsInstance(e, requests.Timeout)
+        for texto in (str(e), traza, salida):
+            self.assertNotIn(CLAVE, texto)
+
+    def test_error_http_no_se_reintenta(self):
+        get = mock.Mock(return_value=_respuesta(403, texto="{}"))
+        _llamar_y_capturar(get)
+        self.assertEqual(get.call_count, 1)
+
     def test_sin_clave_lanza_runtimeerror(self):
         with self.assertRaises(RuntimeError):
             _eia_get("", URL, "WDISTUS1", "weekly", "2023-01-01")
