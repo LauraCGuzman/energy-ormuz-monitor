@@ -43,7 +43,7 @@ from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
-import requests
+from data.peticiones import http_get
 import streamlit as st
 
 
@@ -173,7 +173,8 @@ def fetch_punto(
             "to": end,
             "limit": ENTSOG_LIMIT_POR_PETICION,
         }
-        response = requests.get(ENTSOG_OPERATIONALDATA_URL, params=params, timeout=60)
+        response = http_get(ENTSOG_OPERATIONALDATA_URL, params,
+                            etiqueta=f"ENTSOG {point_key}/{operator_key} {indicator} {direction}")
 
         if response.status_code == 404:
             return pd.Series(dtype="float64", index=pd.DatetimeIndex([], name="fecha"))

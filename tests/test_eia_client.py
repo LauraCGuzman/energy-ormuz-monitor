@@ -17,8 +17,20 @@ from unittest import mock
 import pandas as pd
 import requests
 
-from data import eia_client
+from data import eia_client, peticiones
 from data.eia_client import _eia_get, _redactar
+
+# Los reintentos de `http_get` esperan entre intentos: en los tests, sin esperas.
+_parche_sleep = mock.patch.object(peticiones.time, "sleep")
+
+
+def setUpModule():
+    _parche_sleep.start()
+
+
+def tearDownModule():
+    _parche_sleep.stop()
+
 
 CLAVE = "CLAVE_SECRETA_9f8e7d6c"
 URL = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/"
@@ -137,10 +149,10 @@ class TestPeticion(unittest.TestCase):
         pd.testing.assert_frame_equal(df, pd.DataFrame(datos))
         self.assertNotIn(CLAVE, salida.getvalue())
 
-    def test_dos_timeouts_seguidos_lanzan_sin_clave(self):
+    def test_timeout_en_todos_los_intentos_lanza_sin_clave(self):
         get = mock.Mock(side_effect=requests.Timeout(f"Read timed out. url: {URL_CON_CLAVE}"))
         e, traza, salida = _llamar_y_capturar(get)
-        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_count, peticiones.INTENTOS)
         self.assertIsInstance(e, requests.Timeout)
         for texto in (str(e), traza, salida):
             self.assertNotIn(CLAVE, texto)

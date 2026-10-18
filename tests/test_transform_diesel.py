@@ -414,7 +414,8 @@ class TestPaginacion(unittest.TestCase):
 
     def test_los_errores_de_red_no_llevan_la_clave(self):
         e = requests.ConnectionError(f"Max retries exceeded with url: /x?api_key={CLAVE}&f=1")
-        with mock.patch.object(eia_client.requests, "get", mock.Mock(side_effect=e)):
+        with mock.patch.object(eia_client.requests, "get", mock.Mock(side_effect=e)), \
+                mock.patch("data.peticiones.time.sleep"):
             with self.assertRaises(requests.ConnectionError) as cm:
                 _eia_get_paginado(CLAVE, URL, ("A",), "monthly", "2026-01")
         self.assertNotIn(CLAVE, str(cm.exception))

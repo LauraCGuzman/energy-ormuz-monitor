@@ -5,8 +5,7 @@ import requests
 import pandas as pd
 import streamlit as st
 
-
-_TIMEOUT = (10, 60)  # (conexión, lectura) en segundos
+from data.peticiones import http_get
 
 
 def _redactar(texto, API_KEY):
@@ -32,13 +31,7 @@ def _eia_get(API_KEY, url_base, series_id, frecuencia, start):
         'sort[0][direction]': 'asc'
     }
     try:
-        try:
-            respuesta = requests.get(url_base, params=parametros, timeout=_TIMEOUT)
-        except (requests.Timeout, requests.ConnectionError):
-            # La EIA a veces deja una petición colgada y la siguiente responde en
-            # ~1 s: un único reintento evita que un cuelgue suelto tumbe el panel.
-            print(f"⚠️ EIA {series_id}: timeout o fallo de conexión, se reintenta una vez")
-            respuesta = requests.get(url_base, params=parametros, timeout=_TIMEOUT)
+        respuesta = http_get(url_base, parametros, etiqueta=f"EIA {series_id}")
         if respuesta.status_code != 200:
             print(f"❌ Error EIA {series_id}. Status: {respuesta.status_code}")
             print(f"Detalle: {_redactar(respuesta.text[:300], API_KEY)}")
@@ -214,7 +207,7 @@ def _eia_get_paginado(API_KEY, url_base, series_ids, frecuencia, start, longitud
             'offset': offset,
         }
         try:
-            respuesta = requests.get(url_base, params=parametros, timeout=_TIMEOUT)
+            respuesta = http_get(url_base, parametros, etiqueta=f"EIA paginada offset={offset}")
             respuesta.raise_for_status()
             resp = respuesta.json()['response']
             total_pagina = int(resp['total'])

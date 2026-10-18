@@ -8,17 +8,17 @@ el "best match" por defecto: la validación de la Fase 1 del pliego HDD
 validó — el "best match" por defecto mezcla ERA5 con ECMWF IFS en los últimos
 días y daría una serie distinta a la que se comprobó en la Fase 1.
 
-Mismo patrón que `portwatch_client.py`: REST público con `requests`, caché de
-Streamlit, y sin `except`: un fallo de red o un código de error de la API
-tienen que propagarse tal cual, igual que en el resto del repo. A diferencia
-de `portwatch_client.py` (que no lo tiene — no se toca aquí, es aparte), esta
-llamada sí lleva `timeout` explícito.
+Mismo patrón que `portwatch_client.py`: REST público vía `http_get` (timeout y
+reintentos comunes), caché de Streamlit, y sin `except`: un fallo de red o un
+código de error de la API tienen que propagarse tal cual, igual que en el
+resto del repo.
 """
 from __future__ import annotations
 
 import pandas as pd
-import requests
 import streamlit as st
+
+from data.peticiones import http_get
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
@@ -48,9 +48,9 @@ def fetch_daily_temperature(
     if end is None:
         end = pd.Timestamp.today().strftime("%Y-%m-%d")
 
-    respuesta = requests.get(
+    respuesta = http_get(
         ARCHIVE_URL,
-        params={
+        {
             "latitude": lat,
             "longitude": lon,
             "start_date": start,
@@ -58,7 +58,7 @@ def fetch_daily_temperature(
             "daily": "temperature_2m_mean",
             "models": "era5",
         },
-        timeout=60,
+        etiqueta=f"Open-Meteo ({lat}, {lon})",
     )
     respuesta.raise_for_status()
     datos = respuesta.json()
